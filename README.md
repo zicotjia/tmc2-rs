@@ -10,8 +10,14 @@ A port of [mpeg-pcc-tmc2](https://github.com/MPEGGroup/mpeg-pcc-tmc2). As of Jan
 
 ## Building
 
-1. Make sure you have ffmpeg 4.4 installed in your path. If you use nix, simply do `nix-shell`. Note that ffmpeg 5.x is NOT supported.
-2. Run `cargo build --release --bin decoder`
+`tmc2-rs` makes of use [the `ffmpeg-next` crate](https://crates.io/crates/ffmpeg-next), which is in sync with the FFMPEG version.  We currently use `ffmpeg-next` version 6.  To compile `ffmpeg-next`, make sure that 
+1. You have ffmpeg 6.1.1 installed in your path. If you use nix, simply do `nix-shell`. Note that ffmpeg 7.x is NOT supported.
+2. The environment variable `PKG_CONFIG_HOME` is set so that `ffmpeg-sys-next` can find the relevant `ffmpeg` libraries.  On macOS, for instance, after you run `brew install ffmpeg@6`, you need to set `PKG_CONFIG_HOME` to something like `/usr/local/Cellar/ffmpeg@6/6.1.1_1/lib/pkgconfig`
+
+To build, run
+```
+cargo build --release --bin decoder`
+```
 
 ## Generating bin files
 
