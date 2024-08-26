@@ -17,6 +17,7 @@ type Color16bit = Vector3<u16>;
 // type Normal3D = Vector3<usize>;
 // type Matrix3D = Matrix3<usize>;
 
+// Set of point clouds
 #[derive(Debug, Default)]
 pub struct PointSet3 {
     // NOTE: IF YOU UPDATE THIS STRUCT, dont forget to update resize and append point set.

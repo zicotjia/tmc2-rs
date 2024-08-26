@@ -32,16 +32,23 @@ impl Decoder {
     /// Decode the parsed compressed stream (as represented in `Context`) and send the results frame-by-frame through the `tx` channel.
     /// If any errors occur while sending (i.e. due to receiver being dropped), it will return an error and stop decoding.
     pub fn decode(&self, context: &mut Context, tx: Sender<PointSet3>) -> Result<(), String> {
+        // By this point context has all the bitstream already
+        // processed frame will be set to tx
+
         // TODO(12Dec22): it seems that this function can be parallelized
         // if ( params_.nbThread_ > 0 ) { tbb::task_scheduler_init init( static_cast<int>( params_.nbThread_ ) ); }
 
         let mut atlas_context = Self::create_patch_frame(context);
 
         let sps = context.get_vps().expect("VPS not found");
+        // Color, etc
         let ai = &sps.attribute_information;
+        // Is there a pixel here or not
         let oi = &sps.occupancy_information;
+        // Where is this pixel
         let gi = &sps.geometry_information;
         let asps = context.get_atlas_sequence_parameter_set(0);
+        // Which frame is this
         let frame_count = atlas_context.frame_count();
         let ptl = &sps.profile_tier_level;
         let geometry_bitdepth = gi.geometry_2d_bitdepth_minus1 + 1;
@@ -53,7 +60,9 @@ impl Decoder {
         assert!(!has_aux_data);
 
         // TODO: set_consitant_four_cc_code(context, 0);
+        // Codec used to decode occupancy map
         let occupancy_codec_id = CodecId::from(oi.occupancy_codec_id);
+        // Codec used to decode geometry map
         let geometry_codec_id = CodecId::from(gi.geometry_codec_id);
         let _path_prefix = format!(
             "{:?}_dec_GOF{}",
@@ -70,8 +79,10 @@ impl Decoder {
             ptl.profile_codec_group_idc, occupancy_codec_id, geometry_codec_id
         );
 
+        // FFMPEG stuff
         let mut video_decoder = LibavcodecDecoder {};
 
+        // 1. Decode Occupancy map
         let occ_bitstream = context
             .get_video_bitstream(VideoType::Occupancy)
             .expect("No occupancy bitstream");
@@ -91,11 +102,14 @@ impl Decoder {
             )
             .unwrap();
         atlas_context.occ_frames = occ_video;
+        // ???
         assert_eq!(oi.occupancy_2d_bitdepth_minus1, 7);
         assert!(!oi.occupancy_msb_align_flag);
         // context.getVideoOccupancyMap().convertBitdepth( 8, oi.getOccupancy2DBitdepthMinus1() + 1,
         //                                           oi.getOccupancyMSBAlignFlag() );
 
+
+        // 2. Decode geometry map
         if sps.multiple_map_streams_present_flag {
             unimplemented!("multiple map streams not implemented");
         } else {
@@ -129,6 +143,7 @@ impl Decoder {
             unimplemented!("Auxiliary geometry video not implemented")
         }
 
+        // Decode attribute map
         // We only have 1 attribute actually
         assert_eq!(ai.attribute_count, 1);
         for i in 0..ai.attribute_count {
@@ -184,6 +199,7 @@ impl Decoder {
 
         debug!("generate point cloud of {} frames", frame_count);
         // TODO: Looks like this is embarassingly parallel
+        // ZICO: Maybe add RAYON here
         assert!(frame_count <= atlas_context.frame_count());
         for frame_idx in 0..frame_count {
             // all video have been decoded, start reconstruction processes

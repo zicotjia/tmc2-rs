@@ -10,7 +10,10 @@ pub mod reader;
 
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Position {
+    // Depending on target
+    // Position of the bytes in the bitStream
     pub bytes: usize,
+    // Position of the bits in the bytes of the bitStream
     pub bits: u8,
 }
 
@@ -51,6 +54,7 @@ pub struct Bitstream {
 }
 
 impl Bitstream {
+    // WHY u8, u8 is size of a byte
     pub fn new(data: Vec<u8>) -> Self {
         Self {
             data,
@@ -133,16 +137,25 @@ impl Bitstream {
         src.position.borrow_mut().bytes += bitstream_size;
     }
 
+    // Read up to a number of bits
     pub fn read(&self, bits: u8) -> u32 {
         if bits > 32 {
+            // Cannot read a value that is higher than 32 bits
             panic!("Bitstream::read: bits > 32");
         }
 
         let mut val: u32 = 0;
         let mut i = 0;
+        // While index is less than bits
         while i < bits {
+            // Get the current byte >> shift by (7 - self.bits) to get the current bit
+            // AND it with 1 to get only that bit (Preserve first bit on the right)
+            // Shift that isolated bit to the correct position which is (bits - i - 1)
+            // Or the Val with the
             val |= (((self.data[self.bytes()] >> (7 - self.bits())) & 1) as u32) << (bits - i - 1);
+            // Move to the next bit of the byte
             self.position.borrow_mut().bits += 1;
+            // If have travelled all bits, increment the bytes (move to next byte)
             if self.bits() == 8 {
                 self.position.borrow_mut().bytes += 1;
                 self.position.borrow_mut().bits = 0;
@@ -152,6 +165,9 @@ impl Bitstream {
         val
     }
 
+
+    // Peek up to a number of bits
+    // bits is reset to original position
     pub fn peek(&self, bits: u8) -> u32 {
         let pos = *self.position.borrow();
         let res = self.read(bits);
@@ -160,12 +176,14 @@ impl Bitstream {
         res
     }
 
+    // Read up to multiple bytes
     fn read_slice(&self, size: usize) -> &[u8] {
         let bytes = self.bytes();
         self.position.borrow_mut().bytes += size;
         &self.data[bytes..bytes + size]
     }
 
+    // Some codec need this black magic operation
     /// read unsigned variable length code (Oth order Exp-Golomb codes)
     fn read_uvlc(&self) -> u32 {
         let mut leading_zeros = 0;
@@ -178,6 +196,7 @@ impl Bitstream {
         (1 << leading_zeros) - 1 + self.read(leading_zeros)
     }
 
+    // Some codec need this black magic operation but for signed int
     #[allow(clippy::neg_multiply)]
     fn read_svlc(&self) -> i32 {
         let x = self.read_uvlc();

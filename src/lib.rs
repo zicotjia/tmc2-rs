@@ -145,6 +145,7 @@ impl Decoder {
     }
 }
 
+// Ued so that we can get all the decoder item in a for loop
 impl Iterator for Decoder {
     type Item = PointSet3;
 
