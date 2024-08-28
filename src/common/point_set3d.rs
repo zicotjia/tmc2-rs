@@ -145,3 +145,26 @@ fn convert_yuv10_to_rgb8(color16: &Vector3<u16>) -> Vector3<u8> {
     Vector3 { x: r, y: g, z: b }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use vivotk::formats::pointxyzrgba::PointXyzRgba;
+    use super::*;
+
+    #[test]
+    fn test_vectorOfPointsConversionToPointSet() {
+        let vectorOfStructs: Vec<PointXyzRgba> = Vec::from(
+            [PointXyzRgba {x: 10.0, y: 0.0, z: 0.0, r: 1, g: 0, b: 0, a: 0 },
+                PointXyzRgba {x: 0.0, y: 10.0, z: 0.0, r: 0, g: 2, b: 0, a: 0 },
+                PointXyzRgba {x: 0.0, y: 0.0, z: 10.0, r: 0, g: 0, b: 3, a: 3 }]
+        );
+        // COuld be improved to account for conversion of f32 to u16
+        let structOfVectors = PointSet3::from(vectorOfStructs);
+        assert_eq!(structOfVectors.positions[0], Point3D {x: 10, y: 0, z: 0});
+        assert_eq!(structOfVectors.positions[1], Point3D {x: 0, y: 10, z: 0});
+        assert_eq!(structOfVectors.positions[2], Point3D {x: 0, y: 0, z: 10});
+        assert_eq!(structOfVectors.colors[0], Color3B {x: 1, y: 0, z: 0});
+        assert_eq!(structOfVectors.colors[1], Color3B {x: 0, y: 2, z: 0});
+        assert_eq!(structOfVectors.colors[2], Color3B {x: 0, y: 0, z: 3});
+    }
+}
