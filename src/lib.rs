@@ -3,8 +3,6 @@ pub mod codec;
 mod common;
 mod decoder;
 pub mod writer;
-mod pcd;
-mod formats;
 
 use bitstream::Bitstream;
 use codec::PointSet3;

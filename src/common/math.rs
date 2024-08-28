@@ -4,7 +4,6 @@ use std::fmt::Debug;
 use cgmath::{Vector3};
 use cgmath::num_traits::float::FloatCore;
 use serde::{Deserialize, Serialize};
-use crate::formats::PointCloud;
 // use super::pointxyzrgba::PointXyzRgba;
 
 #[derive(Clone)]

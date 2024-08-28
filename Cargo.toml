@@ -28,6 +28,8 @@ image = "0.25.2"
 bincode = "2.0.0-rc.3"
 bytemuck = "1.17.1"
 
+vvtk = { git = "https://github.com/nus-vv-streams/vvtk/"}
+
 [[bin]]
 name = "decoder"
 
