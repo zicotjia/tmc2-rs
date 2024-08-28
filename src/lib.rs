@@ -1,15 +1,15 @@
 mod bitstream;
 pub mod codec;
-mod common;
+pub mod common;
 mod decoder;
 pub mod writer;
 
 use bitstream::Bitstream;
-use codec::PointSet3;
 use common::context::Context;
 use crossbeam_channel as chan;
 use std::path::PathBuf;
 use std::thread;
+use crate::common::point_set3d::PointSet3;
 
 /// The library's decoder
 pub struct Decoder {

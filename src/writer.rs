@@ -1,8 +1,7 @@
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
-
-use crate::codec::PointSet3;
+use crate::common::point_set3d::PointSet3;
 
 // http://gamma.cs.unc.edu/POWERPLANT/papers/ply.pdf
 pub enum Format {

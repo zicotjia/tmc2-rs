@@ -1,5 +1,6 @@
 pub mod context;
-mod math;
+pub mod math;
+pub mod point_set3d;
 
 use crate::decoder::{Image, Video};
 

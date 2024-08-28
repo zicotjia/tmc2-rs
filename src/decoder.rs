@@ -5,7 +5,7 @@ use crate::{
         },
         VideoBitstream, VideoType,
     },
-    codec::{self, generate_point_cloud, EomParams, Point3D, PointSet3},
+    codec::{self, generate_point_cloud, EomParams},
     common::{
         context::{AtlasContext, AtlasFrameContext, TileContext},
         ColorFormat, VideoAttribute, VideoGeometry, VideoOccupancyMap,
@@ -19,6 +19,7 @@ use log::{debug, trace};
 use num_enum::FromPrimitive;
 use std::{cell::RefCell, fs::File};
 use std::{io::Write, marker::PhantomData};
+use crate::common::point_set3d::{Point3D, PointSet3};
 
 pub(crate) struct Decoder {
     params: Params,
