@@ -1,4 +1,5 @@
 pub mod context;
+mod math;
 
 use crate::decoder::{Image, Video};
 

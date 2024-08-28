@@ -21,6 +21,12 @@ cgmath = "0.18.0"
 fast-math = "0.1.1"
 num_enum = "0.5.7"
 crossbeam-channel = "0.5.6"
+serde = { version = "1.0.209", features = ["derive"] }
+thiserror = "1.0.63"
+byteorder = "1.5.0"
+image = "0.25.2"
+bincode = "2.0.0-rc.3"
+bytemuck = "1.17.1"
 
 [[bin]]
 name = "decoder"
