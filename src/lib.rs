@@ -3,6 +3,7 @@ pub mod codec;
 pub mod common;
 mod decoder;
 pub mod writer;
+mod encoder;
 
 use bitstream::Bitstream;
 use common::context::Context;
