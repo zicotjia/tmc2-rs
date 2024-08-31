@@ -28,7 +28,15 @@ image = "0.25.2"
 bincode = "2.0.0-rc.3"
 bytemuck = "1.17.1"
 
+unzip3 = "1.0.0"
+
 vvtk = { git = "https://github.com/nus-vv-streams/vvtk/"}
+rayon = "1.10.0"
+approx = "0.5.1"
+
+kdtree = "0.7.0"
+
+nalgebra = "0.32.3"
 
 [[bin]]
 name = "decoder"

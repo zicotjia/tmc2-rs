@@ -1,10 +1,11 @@
-use cgmath::Vector3;
+use cgmath::{point1, Vector3};
+use unzip3::Unzip3;
 
 pub type Point3D = Vector3<u16>;
 pub type Color3B = Vector3<u8>;
 
 type Color16bit = Vector3<u16>;
-// type Normal3D = Vector3<usize>;
+type Normal3D = Vector3<f64>;
 // type Matrix3D = Matrix3<usize>;
 
 // Set of point clouds
@@ -20,8 +21,8 @@ pub struct PointSet3 {
     /// Only if PCC_SAVE_POINT_TYPE is true
     // types: Vec<u8>,
     // reflectances: Vec<u16>,
-    // normals: Vec<Normal3D>,
-    // with_normals: bool,
+    pub normals: Vec<Normal3D>,
+    pub with_normals: bool,
     pub with_colors: bool,
     // with_reflectances: bool,
 }
@@ -35,7 +36,22 @@ impl From<Vec<vivotk::formats::pointxyzrgba::PointXyzRgba>> for PointSet3 {
                 Point3D {x : point.x as u16, y: point.y as u16, z: point.z as u16},
                 Color3B {x: point.r, y: point.g, z: point.b})
             ).unzip();
-        PointSet3 { positions, colors, colors16bit: vec![], point_patch_indexes: vec![], with_colors: false }
+        PointSet3 { positions, colors, colors16bit: vec![], point_patch_indexes: vec![], normals: vec![], with_normals: false, with_colors: false }
+    }
+}
+
+// ZICO: Beware VVTK use f32 for normals while tmc2 use f64
+impl From<Vec<vivotk::formats::pointxyzrgbanormal::PointXyzRgbaNormal>> for PointSet3 {
+    fn from(value: Vec<vivotk::formats::pointxyzrgbanormal::PointXyzRgbaNormal>) -> Self {
+        // ZICO: Alpha is unused for now
+        let (positions, colors, normals): (Vec<Point3D>, Vec<Color3B>, Vec<Normal3D>) = value
+            .into_iter()
+            .map(|point| (
+                Point3D {x : point.x as u16, y: point.y as u16, z: point.z as u16},
+                Color3B {x: point.r, y: point.g, z: point.b},
+                Normal3D {x: point.nx as f64, y: point.ny as f64, z: point.z as f64})
+            ).unzip3();
+        PointSet3 { positions, colors, colors16bit: vec![], point_patch_indexes: vec![], normals, with_normals: false, with_colors: false }
     }
 }
 
@@ -51,6 +67,9 @@ impl PointSet3 {
         if self.with_colors {
             self.colors.push(Color3B::new(127, 127, 127));
             self.colors16bit.push(Color16bit::new(0, 0, 0));
+        }
+        if self.with_normals {
+            self.normals.push(Normal3D::new(0.0, 0.0, 0.0));
         }
         self.point_patch_indexes.push((0, 0));
         self.positions.len() - 1
@@ -68,6 +87,7 @@ impl PointSet3 {
         self.colors16bit.extend(pointset.colors16bit.iter());
         self.point_patch_indexes
             .extend(pointset.point_patch_indexes.iter());
+        self.normals.extend(pointset.normals.iter());
 
         // SKIP: self.resize(self.point_count()). for what?
         self.point_count()
@@ -78,6 +98,9 @@ impl PointSet3 {
         if self.with_colors {
             self.colors.reserve(size);
             self.colors16bit.reserve(size);
+        }
+        if self.with_normals {
+            self.normals.reserve(size);
         }
         self.point_patch_indexes.reserve(size);
     }
@@ -148,23 +171,45 @@ fn convert_yuv10_to_rgb8(color16: &Vector3<u16>) -> Vector3<u8> {
 
 #[cfg(test)]
 mod tests {
+    use cgmath::assert_relative_eq;
     use vivotk::formats::pointxyzrgba::PointXyzRgba;
+    use vivotk::formats::pointxyzrgbanormal::PointXyzRgbaNormal;
     use super::*;
 
     #[test]
     fn test_vectorOfPointsConversionToPointSet() {
         let vectorOfStructs: Vec<PointXyzRgba> = Vec::from(
-            [PointXyzRgba {x: 10.0, y: 0.0, z: 0.0, r: 1, g: 0, b: 0, a: 0 },
-                PointXyzRgba {x: 0.0, y: 10.0, z: 0.0, r: 0, g: 2, b: 0, a: 0 },
-                PointXyzRgba {x: 0.0, y: 0.0, z: 10.0, r: 0, g: 0, b: 3, a: 3 }]
+            [PointXyzRgba { x: 10.0, y: 0.0, z: 0.0, r: 1, g: 0, b: 0, a: 0 },
+                PointXyzRgba { x: 0.0, y: 10.0, z: 0.0, r: 0, g: 2, b: 0, a: 0 },
+                PointXyzRgba { x: 0.0, y: 0.0, z: 10.0, r: 0, g: 0, b: 3, a: 3 }]
         );
         // COuld be improved to account for conversion of f32 to u16
         let structOfVectors = PointSet3::from(vectorOfStructs);
-        assert_eq!(structOfVectors.positions[0], Point3D {x: 10, y: 0, z: 0});
-        assert_eq!(structOfVectors.positions[1], Point3D {x: 0, y: 10, z: 0});
-        assert_eq!(structOfVectors.positions[2], Point3D {x: 0, y: 0, z: 10});
-        assert_eq!(structOfVectors.colors[0], Color3B {x: 1, y: 0, z: 0});
-        assert_eq!(structOfVectors.colors[1], Color3B {x: 0, y: 2, z: 0});
-        assert_eq!(structOfVectors.colors[2], Color3B {x: 0, y: 0, z: 3});
+        assert_eq!(structOfVectors.positions[0], Point3D { x: 10, y: 0, z: 0 });
+        assert_eq!(structOfVectors.positions[1], Point3D { x: 0, y: 10, z: 0 });
+        assert_eq!(structOfVectors.positions[2], Point3D { x: 0, y: 0, z: 10 });
+        assert_eq!(structOfVectors.colors[0], Color3B { x: 1, y: 0, z: 0 });
+        assert_eq!(structOfVectors.colors[1], Color3B { x: 0, y: 2, z: 0 });
+        assert_eq!(structOfVectors.colors[2], Color3B { x: 0, y: 0, z: 3 });
+
+        #[test]
+        fn test_vectorOfPointsWithNormalConversionToPointSet() {
+            let vectorOfStructs: Vec<PointXyzRgbaNormal> = Vec::from(
+                [PointXyzRgbaNormal { x: 10.0, y: 0.0, z: 0.0, r: 1, g: 0, b: 0, a: 0, nx: 0.0, ny: 0.0, nz: 1.0 },
+                    PointXyzRgbaNormal { x: 0.0, y: 10.0, z: 0.0, r: 0, g: 2, b: 0, a: 0, nx: 0.0, ny: 2.0, nz: 0.0 },
+                    PointXyzRgbaNormal { x: 0.0, y: 0.0, z: 10.0, r: 0, g: 0, b: 3, a: 3, nx: 3.0, ny: 0.0, nz: 0.0 }]
+            );
+            // COuld be improved to account for conversion of f32 to u16
+            let structOfVectors = PointSet3::from(vectorOfStructs);
+            assert_eq!(structOfVectors.positions[0], Point3D { x: 10, y: 0, z: 0 });
+            assert_eq!(structOfVectors.positions[1], Point3D { x: 0, y: 10, z: 0 });
+            assert_eq!(structOfVectors.positions[2], Point3D { x: 0, y: 0, z: 10 });
+            assert_eq!(structOfVectors.colors[0], Color3B { x: 1, y: 0, z: 0 });
+            assert_eq!(structOfVectors.colors[1], Color3B { x: 0, y: 2, z: 0 });
+            assert_eq!(structOfVectors.colors[2], Color3B { x: 0, y: 0, z: 3 });
+            assert_relative_eq!(structOfVectors.normals[0], Normal3D {x: 0.0, y: 0.0, z: 1.0});
+            assert_relative_eq!(structOfVectors.normals[1], Normal3D {x: 0.0, y: 2.0, z: 0.0});
+            assert_relative_eq!(structOfVectors.normals[2], Normal3D {x: 3.0, y: 0.0, z: 0.0});
+        }
     }
 }

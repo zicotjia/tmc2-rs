@@ -61,7 +61,9 @@ fn test_point_set_conversion() {
 
     let ptcl = PointCloud::<PointXyzRgba>::from(ptcl.unwrap());
 
-    let point_cloud = PointSet3::from(ptcl.points);
+    let ptcl_with_normal = tmc2rs::encoder::vvtk_normal_estimation::perform_normal_estimation(&ptcl, 16);
+
+    let point_cloud = PointSet3::from(ptcl_with_normal.points);
 
     let duration = start.elapsed(); // Stop timing
     println!("Time taken by point_cloud conversion: {:?}", duration);
