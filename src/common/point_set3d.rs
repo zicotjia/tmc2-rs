@@ -5,7 +5,7 @@ pub type Point3D = Vector3<u16>;
 pub type Color3B = Vector3<u8>;
 
 type Color16bit = Vector3<u16>;
-type Normal3D = Vector3<f64>;
+pub type Normal3D = Vector3<f64>;
 // type Matrix3D = Matrix3<usize>;
 
 // Set of point clouds

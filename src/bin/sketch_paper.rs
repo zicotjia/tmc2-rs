@@ -5,6 +5,7 @@ use vivotk::formats::pointxyzrgba::PointXyzRgba;
 use vivotk::pcd::{read_pcd_file, read_pcd_header};
 use tmc2rs::common;
 use tmc2rs::common::point_set3d::{Point3D, PointSet3};
+use tmc2rs::encoder::patch_segmenter::PatchSegmenter;
 
 // For quick testing
 fn main() {
