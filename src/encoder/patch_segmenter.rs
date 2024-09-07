@@ -129,7 +129,7 @@ impl PatchSegmenter {
     }
 
     // Segment into partitions based on the normal
-    fn initialSegmentation(
+    pub fn initialSegmentation(
         geometry: &PointSet3,
         orientations: [Vector3D; 6], //Hardcoded to 6 for now
         orientations_count: usize,

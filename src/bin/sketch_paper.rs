@@ -5,11 +5,13 @@ use vivotk::formats::pointxyzrgba::PointXyzRgba;
 use vivotk::pcd::{read_pcd_file, read_pcd_header};
 use tmc2rs::common;
 use tmc2rs::common::point_set3d::{Point3D, PointSet3};
+use tmc2rs::encoder::constants::orientations::{orientations6, orientations6Count};
 use tmc2rs::encoder::patch_segmenter::PatchSegmenter;
+use tmc2rs::encoder::Vector3D;
 
 // For quick testing
 fn main() {
-    test_point_set_conversion();
+    test_point_initial_segmentation();
 }
 
 fn read_pcd_test() {
@@ -71,4 +73,49 @@ fn test_point_set_conversion() {
 
     // let ph = ph.unwrap();
     println!("number if points: {:#?}", point_cloud.positions.len());
+}
+
+fn test_point_initial_segmentation() {
+    let file_path = "../pointClouds/longdress/Pcd";
+
+    let mut paths = fs::read_dir(file_path).unwrap();
+
+    paths.next();
+
+    let sample_pcd_file_path = paths.next().unwrap().unwrap().path();
+
+    println!("First path: {:?}", sample_pcd_file_path);
+
+    let start = Instant::now(); // Start timing
+
+    let header = read_pcd_header(sample_pcd_file_path.clone());
+    let ptcl = read_pcd_file(sample_pcd_file_path.clone());
+
+    let duration = start.elapsed(); // Stop timing
+    println!("Time taken by read_pcd: {:?}", duration);
+
+    let start = Instant::now(); // Start timing
+
+    let ptcl = PointCloud::<PointXyzRgba>::from(ptcl.unwrap());
+
+    let ptcl_with_normal = tmc2rs::encoder::vvtk_normal_estimation::perform_normal_estimation(&ptcl, 16);
+
+    let point_cloud = PointSet3::from(ptcl_with_normal.points);
+
+    let duration = start.elapsed(); // Stop timing
+    println!("Time taken by point_cloud conversion: {:?}", duration);
+
+    let start = Instant::now(); // Start timing
+
+    let axis_weights = Vector3D { x: 1.0, y: 1.0, z: 1.0 };
+    let partition = PatchSegmenter::initialSegmentation(
+        &point_cloud, orientations6, orientations6Count, &axis_weights
+    );
+
+    let duration = start.elapsed(); // Stop timing
+    println!("Time taken by initial segmentation: {:?}", duration);
+
+
+    // let ph = ph.unwrap();
+    println!("number if points: {:#?}", partition.len());
 }
