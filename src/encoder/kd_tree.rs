@@ -1,7 +1,7 @@
 use clap::value_parser;
 use kdtree::distance::squared_euclidean;
 use kdtree::KdTree;
-use crate::common::point_set3d::Point3D;
+use crate::common::point_set3d::{Point3D, PointSet3};
 
 // NN: nearest_neighbour
 pub struct NNQuery3 {
@@ -61,6 +61,12 @@ impl PCCKdTree {
         PCCKdTree {
             kdtree_: KdTree::new(3)
         }
+    }
+
+    pub fn build_from_point_set(&mut self, point_set: &PointSet3) {
+        point_set.positions.iter().enumerate().for_each(|(index, position)| {
+            self.add(position, index)
+        });
     }
 
     // Add a point entry into the kdTree
