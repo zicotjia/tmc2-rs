@@ -92,12 +92,29 @@ impl PatchSegmenter {
         }
         assert!(geometry_vox.with_normals);
 
+        let partition: Vec<usize>;
         // Initial Segmentation
         if params.additional_projection_plane_mode == 0 {
-            unimplemented!("initialSegmentation")
+            partition = Self::initialSegmentation(&geometry_vox, orientations, orientationsCount, &params.weight_normal)
         } else {
             unimplemented!("initialSegmentation for additional projection plane")
         }
+
+
+        // ZICO: For now lets skip all segmentation refinement
+        // if params.grid_based_refine_segmentation {
+        //     unimplemented!("grid-based refine segmentation")
+        // } else {
+        //     unimplemented!("refine segmentation")
+        // }
+
+        // ZICO: Implement Segment Patches
+
+        // let resampled = PointSet3::default();
+        // let patchPartition: Vec<usize>;
+        // let resampledPatchPartition: Vec<usize>;
+        // let raw
+
 
     }
 
@@ -181,7 +198,6 @@ impl PatchSegmenter {
         partition
     }
 }
-
 #[cfg(test)]
 mod tests {
     use crate::common::point_set3d::{Normal3D, Point3D};
