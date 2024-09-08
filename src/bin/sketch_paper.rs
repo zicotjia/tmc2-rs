@@ -109,7 +109,7 @@ fn test_point_initial_segmentation() {
     let start = Instant::now(); // Start timing
 
     let axis_weights = Vector3D { x: 1.0, y: 1.0, z: 1.0 };
-    let partition = PatchSegmenter::initialSegmentation(
+    let partition = PatchSegmenter::initial_segmentation(
         &point_cloud, orientations6, orientations6Count, &axis_weights
     );
 
@@ -128,7 +128,8 @@ fn test_build_kd_tree() {
 
     paths.next();
 
-    let sample_pcd_file_path = paths.next().unwrap().unwrap().path();
+    //let sample_pcd_file_path = paths.next().unwrap().unwrap().path();
+    let sample_pcd_file_path = "./test_files/pcd/ascii.pcd";
 
     println!("First path: {:?}", sample_pcd_file_path);
 
