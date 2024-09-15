@@ -1,4 +1,3 @@
-
 use std::collections::HashMap;
 use cgmath::InnerSpace;
 use crate::common::math::BoundingBox;
@@ -162,7 +161,7 @@ impl PatchSegmenter {
         let mut partition = Vec::new();
         // ZICO(QUESTION): What is axis_weight used for?
         let point_count = geometry.point_count();
-        partition.reserve(point_count);
+        partition.resize(point_count, 0);
         let mut weight_value: [f64; 18] = [1.0; 18];
         weight_value[0] = axis_weight[0];
         weight_value[1] = axis_weight[1];
@@ -171,41 +170,50 @@ impl PatchSegmenter {
         weight_value[4] = axis_weight[1];
         weight_value[5] = axis_weight[2];
 
-        #[cfg(feature = "parallel")]
-        use rayon::prelude::*;
-        #[cfg(feature = "parallel")]
-        partition.par_iter_mut().enumerate().for_each(|(i, part)| {
-            let normal = geometry.normals[i];
-            let mut cluster_index = 0;
-            let mut best_score = normal.dot(orientations[0]);
-            for j in 1..orientations_count {
-                let score = normal.dot(orientations[j]) * weight_value[j];
-                if score > best_score {
-                    best_score = score;
-                    cluster_index = j;
-                }
-            }
-
-            *part = cluster_index;
-        });
-        // ZICO: Can improve to be multithreaded or made functional
-        for i in 0..point_count {
-            let normal = geometry.normals[i];
-            let mut cluster_index = 0;
-            let mut best_score = normal.dot(orientations[0]);
-            for j in 1..orientations_count {
-                let score = normal.dot(orientations[j]) * weight_value[j];
-                if score > best_score {
-                    best_score = score;
-                    cluster_index = j;
-                }
-            }
-            partition.push(cluster_index);
+        #[cfg(feature = "use_rayon")]
+        {
+            use rayon::prelude::*;
+            partition
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(i, part)| {
+                    let normal = geometry.normals[i];
+                    let mut cluster_index = 0;
+                    let mut best_score = normal.dot(orientations[0]);
+                    for j in 1..orientations_count {
+                        let score = normal.dot(orientations[j]) * weight_value[j];
+                        if score > best_score {
+                            best_score = score;
+                            cluster_index = j;
+                        }
+                    }
+                    *part = cluster_index;
+            });
         }
+
+
+        // ZICO: Can be made functional
+        #[cfg(not(feature = "use_rayon"))]
+        {
+            for i in 0..point_count {
+                let normal = geometry.normals[i];
+                let mut cluster_index = 0;
+                let mut best_score = normal.dot(orientations[0]);
+                for j in 1..orientations_count {
+                    let score = normal.dot(orientations[j]) * weight_value[j];
+                    if score > best_score {
+                        best_score = score;
+                        cluster_index = j;
+                    }
+                }
+                partition.push(cluster_index);
+            }
+        }
+
         partition
     }
 
-    pub fn segement_patches(
+    pub fn segment_patches(
         points: &PointSet3,
         kd_tree: &PCCKdTree,
         params: &PatchSegmenterParams,
@@ -312,11 +320,27 @@ impl PatchSegmenter {
         let point_count = point_cloud.point_count();
         let mut adj_matrix: Vec<Vec<usize>> = Vec::new();
         adj_matrix.resize(point_count, vec![]);
-        // Can parallelise
+
+        #[cfg(feature = "use_rayon")]
+        {
+            use rayon::prelude::*;
+            adj_matrix
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(index, adj_list)| {
+                    let point = &point_cloud.positions[index];
+                    let result = kd_tree.search(point, max_NN_count);
+                    *adj_list = result.indices_;
+                });
+        }
+
+
+        #[cfg(not(feature = "use_rayon"))]
         for (index, point) in point_cloud.positions.iter().enumerate() {
             let result = kd_tree.search(point, max_NN_count);
             adj_matrix[index] = result.indices_;
         }
+
         adj_matrix
     }
 }
@@ -398,6 +422,7 @@ mod tests {
             &kd_tree,
             3
         );
+        println!("{:?}", adj_matrix);
         assert_eq!(adj_matrix[0], vec![0, 1, 2]);
         assert_eq!(adj_matrix[4], vec![4, 5, 2]);
     }

@@ -6,6 +6,8 @@ edition = "2021"
 default-run = "decoder"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+use_rayon = []
 
 [lib]
 name = "tmc2rs"
