@@ -238,11 +238,11 @@ impl PatchSegmenter {
         // let additional_projection_axis = params.additional_projection_plane_mode;
         let geometry_bit_depth_2d = params.geometry_bit_depth_2d;
         let geometry_bit_depth_3d = params.geometry_bit_depth_3d;
-        // let patch_expansion_enabled = params.patch_expansion;
+        let patch_expansion_enabled = params.patch_expansion;
         let high_gradient_separation = params.high_gradient_separation;
         let min_gradient = params.min_gradient;
         let min_num_high_gradient_points = params.min_num_high_gradient_points;
-        // let enable_point_cloud_partitioning = params.enable_point_cloud_partitioning;
+        let enable_point_cloud_partitioning = params.enable_point_cloud_partitioning;
 
         let mut roi_bounding_box_min_x = params.roi_bounding_box_min_x.clone();
         let mut roi_bounding_box_max_x = params.roi_bounding_box_max_x.clone();
@@ -285,12 +285,44 @@ impl PatchSegmenter {
         let mut bounding_box_chunks: Vec<BoundingBox> = Vec::new();       // Vector of bounding boxes for each chunk
         let mut adj_chunks: Vec<Vec<Vec<usize>>> = Vec::new();         // Adjacency list for each chunk
 
+        // ZICO: for now patch_expansion and partitioning is disabled
+        // Maybe implement partitioning cause its more memory efficient
+        if patch_expansion_enabled {
+            unimplemented!("Compute Adjacency Info Dist")
+        } else {
+            if enable_point_cloud_partitioning {
+                unimplemented!("Point Cloud Partitioning")
+            } else {
+
+            }
+        }
+
+        // ZICO: Implement compute adjacencyInfo
 
 
+
+    }
+
+    // Connect points with their nearest neighbour
+    pub fn compute_adjacency_info(
+        point_cloud: &PointSet3,
+        kd_tree: &PCCKdTree,
+        max_NN_count: usize
+    ) -> Vec<Vec<usize>> {
+        let point_count = point_cloud.point_count();
+        let mut adj_matrix: Vec<Vec<usize>> = Vec::new();
+        adj_matrix.resize(point_count, vec![]);
+        // Can parallelise
+        for (index, point) in point_cloud.positions.iter().enumerate() {
+            let result = kd_tree.search(point, max_NN_count);
+            adj_matrix[index] = result.indices_;
+        }
+        adj_matrix
     }
 }
 #[cfg(test)]
 mod tests {
+    use kdtree::KdTree;
     use crate::common::point_set3d::{Normal3D, Point3D};
     use super::*;
 
@@ -349,5 +381,24 @@ mod tests {
         println!("{:?}", partition);
         let expected_partition = vec![0, 0, 0, 0, 0, 0];
         assert_eq!(partition, expected_partition)
+    }
+    #[test]
+    fn test_compute_adjacency_info() {
+        let mut point_set = PointSet3::default();
+        point_set.add_point(Point3D { x: 1, y: 0, z: 0 });
+        point_set.add_point(Point3D { x: 2, y: 0, z: 0 });
+        point_set.add_point(Point3D { x: 3, y: 0, z: 0 });
+        point_set.add_point(Point3D { x: 3, y: 1, z: 0 });
+        point_set.add_point(Point3D { x: 4, y: 0, z: 0 });
+        point_set.add_point(Point3D { x: 5, y: 0, z: 0 });
+        let mut kd_tree = PCCKdTree::new();
+        kd_tree.build_from_point_set(&point_set);
+        let adj_matrix = PatchSegmenter::compute_adjacency_info(
+            &point_set,
+            &kd_tree,
+            3
+        );
+        assert_eq!(adj_matrix[0], vec![0, 1, 2]);
+        assert_eq!(adj_matrix[4], vec![4, 5, 2]);
     }
 }

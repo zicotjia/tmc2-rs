@@ -110,7 +110,7 @@ fn test_point_initial_segmentation() {
 
     let axis_weights = Vector3D { x: 1.0, y: 1.0, z: 1.0 };
     let partition = PatchSegmenter::initial_segmentation(
-        &point_cloud, orientations6, orientations6Count, &axis_weights
+        &point_cloud, &orientations6, orientations6Count, &axis_weights
     );
 
     let duration = start.elapsed(); // Stop timing

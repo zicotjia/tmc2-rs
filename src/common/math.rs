@@ -125,12 +125,12 @@ mod tests {
                 Vector3 {x: 0.0, y: 0.0, z: -10.0 }]
         );
         let b_box = create_sut(vec);
-        assert!(relative_eq!(b_box.min.x, -10.0, epsilon = f32::EPSILON));
-        assert!(relative_eq!(b_box.min.y, -10.0, epsilon = f32::EPSILON));
-        assert!(relative_eq!(b_box.min.z, -10.0, epsilon = f32::EPSILON));
-        assert!(relative_eq!(b_box.max.x, 10.0, epsilon = f32::EPSILON));
-        assert!(relative_eq!(b_box.max.y, 10.0, epsilon = f32::EPSILON));
-        assert!(relative_eq!(b_box.max.z, 10.0, epsilon = f32::EPSILON));
+        assert!(relative_eq!(b_box.min.x, -10.0, epsilon = f64::EPSILON));
+        assert!(relative_eq!(b_box.min.y, -10.0, epsilon = f64::EPSILON));
+        assert!(relative_eq!(b_box.min.z, -10.0, epsilon = f64::EPSILON));
+        assert!(relative_eq!(b_box.max.x, 10.0, epsilon = f64::EPSILON));
+        assert!(relative_eq!(b_box.max.y, 10.0, epsilon = f64::EPSILON));
+        assert!(relative_eq!(b_box.max.z, 10.0, epsilon = f64::EPSILON));
     }
 
     #[test]

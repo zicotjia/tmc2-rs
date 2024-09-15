@@ -77,7 +77,7 @@ impl PCCKdTree {
     }
 
     // Find the num_results nearest neighbour
-    pub fn search(&mut self, point: &Point3D, num_results: usize) -> NNResult {
+    pub fn search(&self, point: &Point3D, num_results: usize) -> NNResult {
         let mut pointVec = [0.0; 3];
         pointVec[0] = point.x as f64; pointVec[1] = point.y as f64; pointVec[2] = point.z as f64;
         let nearest = self.kdtree_.nearest(&pointVec, num_results, &squared_euclidean).unwrap();
@@ -85,7 +85,7 @@ impl PCCKdTree {
     }
 
     // Find the neighbour within a certain radius
-    pub fn searchRadius(&mut self, point: &Point3D, num_results: usize, radius: f64) -> NNResult {
+    pub fn searchRadius(&self, point: &Point3D, num_results: usize, radius: f64) -> NNResult {
         let mut pointVec = [0.0; 3];
         pointVec[0] = point.x as f64; pointVec[1] = point.y as f64; pointVec[2] = point.z as f64;
         let nearest = self.kdtree_.within(&pointVec, radius, &squared_euclidean).unwrap();
