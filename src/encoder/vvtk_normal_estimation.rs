@@ -12,7 +12,6 @@ use vivotk::pipeline::subcommands::Subcommand;
 
 type PointType = [f64; 3];
 
-// ZICO: Super hacky way to get normal generation into the code for now
 // Should discuss how to merge vvtk and tmc2 functionality
 // Also, depite taking k (I assume its number of thread), there is no concurrency yet
 

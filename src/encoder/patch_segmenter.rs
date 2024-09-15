@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::c_double;
 use cgmath::InnerSpace;
 use crate::common::math::BoundingBox;
 use crate::common::point_set3d::{Color3B, Point3D, PointSet3};
@@ -220,9 +221,9 @@ impl PatchSegmenter {
         partition: &mut Vec<usize>,
         patch_partition: &mut Vec<usize>,
         resampled_patch_partition: &mut Vec<usize>,
-        raw_points: Vec<usize>,
+        mut raw_points: Vec<usize>,
         resampled: &PointSet3,
-        //sub_point_cloud: &Vec<PointSet3>,
+        sub_point_cloud: &mut Vec<PointSet3>,
         distance_source_rec: &f32,
         orientations: &[Vector3D; 6],
         orientation_count: usize
@@ -296,18 +297,108 @@ impl PatchSegmenter {
         // ZICO: for now patch_expansion and partitioning is disabled
         // Maybe implement partitioning cause its more memory efficient
         if patch_expansion_enabled {
-            unimplemented!("Compute Adjacency Info Dist")
+            unimplemented!("Compute Adjacency Info Dist");
         } else {
             if enable_point_cloud_partitioning {
-                unimplemented!("Point Cloud Partitioning")
+                unimplemented!("Point Cloud Partitioning");
             } else {
+                adj = Self::compute_adjacency_info(
+                    &points,
+                    &kd_tree,
+                    max_nn_count
+                );
+            }
+        }
+        // Extract Patches
+        let raw_points_distance: Vec<f64> = vec![f64::MAX; point_count];
+        raw_points = (0..point_count).collect();
+        let raw_points_chunks: Vec<Vec<usize>>;
+        let raw_points_distance_chunks: Vec<Vec<f64>>;
+        if enable_point_cloud_partitioning {
+            unimplemented!("implement point cloud partitioning")
+        }
+
+        sub_point_cloud.clear();
+        // ZICO: What is A, B here?
+        let mut mean_pab: f64 = 0.0;
+        let mut mean_yab: f64 = 0.0;
+        let mut mean_uab: f64 = 0.0;
+        let mut mean_vab: f64 = 0.0;
+        let mut mean_pba: f64 = 0.0;
+        let mut mean_yba: f64 = 0.0;
+        let mut mean_uba: f64 = 0.0;
+        let mut mean_vba: f64 = 0.0;
+        let test_source_num: usize = 0;
+        let test_reconstructed_num: usize = 0;
+        let number_of_eom: usize = 0;
+
+        // Must go through all raw points
+        while !raw_points.is_empty() {
+            // This algo go through all raw points. Group them into connected components
+            // until not more raw points
+            let mut connected_components: Vec<Vec<usize>>;
+            if !enable_point_cloud_partitioning {
+                let mut fifo: Vec<usize> = Vec::with_capacity(point_count);
+                // ZICO: flags for what? UPDATE: its just check if points have been visited
+                let mut flags: Vec<bool> = vec![true; point_count];
+                // ZICO: Can try changing 256
+                connected_components.reserve(256);
+
+                // ZICO: Must we go through all points for each connected components?
+                for index in raw_points.iter() {
+                    if flags[index] && raw_points_distance[index] > max_allowed_dist2_raw_points_detection {
+                        flags[index] = false;
+                        let connected_components_index = connected_components.len();
+                        // There are 6 partitions for now
+                        let cluster_index = partition[index];
+                        // Add an extra element
+                        connected_components.resize(connected_components_index + 1, vec![]);
+                        let mut connected_component = &connected_components[connected_components_index];
+                        // Maybe copy the iterator instead of reference it
+                        fifo.push(*index);
+                        connected_component.push(*index);
+                        while !fifo.is_empty() {
+                            let current = fifo.pop().unwrap();
+                            for neighbour in adj[current].iter() {
+                                // If the neighbour is also within the same partition
+                                // and if the neighbour has not been in any connected components
+                                // we consider them to be in the same connected components
+                                // Current adj list implementation has point also be connected to itself
+                                // For now lets just add neigbour != current check
+                                // ZICO: come back to this latyer
+                                if partition[neighbour] == cluster_index && flags[neighbour] && *neighbour != current {
+                                    flags[neighbour] = false;
+                                    fifo.push(*neighbour);
+                                    connected_component.push(*neighbour);
+                                }
+                            }
+                        }
+                        // If connected_component size is less than min_point
+                        // Don't add it????
+                        // Isn't this lossy
+                        if connected_component.len() < min_point_count_per_cc {
+                            connected_components.resize(connected_components_index);
+                        } else {
+                            unimplemented!("print debug line here maybe?")
+                        }
+                    }
+                }
+                // println!("number of CC: {}", connected_components.len());
+            } else {
+                unimplemented!("cloud partitioning")
+            }
+            if connected_components.is_empty() {break;}
+            if high_gradient_separation {
+                unimplemented!("separate high hradient points")
+            }
+            if patch_expansion_enabled {
+                unimplemented!("patch expansion enabled")
+            }
+            // Now we finally start creating the patch
+            for connected_component in connected_components.iter() {
 
             }
         }
-
-        // ZICO: Implement compute adjacencyInfo
-
-
 
     }
 
