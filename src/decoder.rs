@@ -723,10 +723,52 @@ pub(crate) enum PatchOrientation {
     MRot270,
 }
 
+#[derive(Default, Clone)]
+// GPA means Geometry Parameter Adjustment I thn=ink
+// u0, v0 is the starting point of the pixel
+// ZICO: dunno if top-left, top-right, etc
+struct GPAPatchData {
+    is_matched: bool,
+    is_global_patch: bool,
+    global_patch_index: i32,
+    size_u0: usize,
+    size_v0: usize,
+    u0: isize,
+    v0: isize,
+    patch_orientation: PatchOrientation,
+    occupancy: Vec<bool>,
+}
+
+impl GPAPatchData {
+    // ZICO: Seems like C++ version make an invalid version
+    // Better make a default version?
+    pub(crate) fn initialize(&mut self) {
+        self.is_matched = false;
+        self.is_global_patch = false;
+        self.global_patch_index = -1;
+        self.size_u0 = 0;
+        self.size_v0 = 0;
+        self.u0 = -1;
+        self.v0 = -1;
+        // C++ version use -1. May cause trouble
+        self.patch_orientation = PatchOrientation::Default;
+        self.occupancy.clear();
+    }
+
+    fn is_patch_dimension_switched(&self) -> bool {
+        matches!(
+            self.patch_orientation,
+            PatchOrientation::Default
+                | PatchOrientation::Rot180
+                | PatchOrientation::Mirror
+                | PatchOrientation::MRot180
+        )
+    }
+}
 /// Originally PCCPatch
 #[derive(Default, Clone)]
 pub(crate) struct Patch {
-    // patch_index: usize,
+    patch_index: usize,
     // original_index: usize,
     // frame_index: usize,
     // tile_index: usize,
@@ -759,9 +801,9 @@ pub(crate) struct Patch {
     // /// occupancy map
     // occupancy: Vec<bool>,
     // /// view_id in 0..=5
-    // view_id: u8,
+    pub(crate) view_id: u8,
     // /// index of matched patch from pre-frame patch
-    // best_match_idx: i32,
+    pub(crate) best_match_idx: i32,
     // ref_atlas_frame_idx: usize,
     // pred_type: usize,
     // /// Enhance delta depth
@@ -774,13 +816,13 @@ pub(crate) struct Patch {
     // point_local_reconstruction_mode_by_patch: u8,
     // point_local_reconstruction_mode_by_block: Vec<u8>,
 
-    // cur_gpa_patch_data: GPAPatchData,
-    // pre_gpa_patch_data: GPAPatchData,
+    pub(crate) cur_gpa_patch_data: GPAPatchData,
+    pub(crate) pre_gpa_patch_data: GPAPatchData,
     // is_global_patch: bool,
     // d0_count: usize,
     // eom_count: usize,
     // eom_and_d1_count: usize,
-    // patch_type: u8,
+    pub(crate) patch_type: PatchModePTile,
     // is_roi_patch: bool,
     // roi_index: usize,
     // /// patch index
@@ -802,7 +844,8 @@ pub(crate) struct Patch {
 impl Patch {
     /// Sets view id, axes, projection mode
     #[inline]
-    fn set_view_id(&mut self, view_id: u8) {
+    pub(crate) fn set_view_id(&mut self, view_id: u8) {
+        self.view_id = view_id;
         match view_id {
             0 => self.set_axis(0, 0, 2, 1, 0),
             1 => self.set_axis(0, 1, 2, 0, 0),
@@ -836,6 +879,13 @@ impl Patch {
         self.axes = (normal, tangent, bitangent);
         self.projection_mode = mode;
     }
+
+    #[inline]
+    pub(crate) fn set_index(&mut self, value: usize) { self.patch_index = value }
+    #[inline]
+    pub(crate) fn set_patch_type(&mut self, value: PatchModePTile) { self.patch_type = value}
+    #[inline]
+    pub(crate) fn set_best_match_idx(&mut self, value: i32) { self.best_match_idx = value}
 
     /// returns the index of the canvas block
     ///
@@ -903,6 +953,11 @@ impl Patch {
             _ => unreachable!(),
         }
     }
+
+    #[inline]
+    pub(crate) fn get_pre_gpa_patch_data(&self) -> &GPAPatchData { &self.pre_gpa_patch_data }
+    #[inline]
+    pub(crate) fn get_cur_gpa_patch_data(&self) -> &GPAPatchData { &self.cur_gpa_patch_data }
 }
 
 #[derive(Default, Debug, Clone, Copy)]

@@ -1752,7 +1752,7 @@ pub(crate) enum PatchModeITile {
     End = 14,
 }
 
-#[derive(Debug, FromPrimitive)]
+#[derive(Debug, FromPrimitive, Clone, Default)]
 #[repr(u8)]
 pub(crate) enum PatchModePTile {
     #[default]

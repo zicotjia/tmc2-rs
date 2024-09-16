@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::c_double;
 use cgmath::InnerSpace;
+use crate::common::INVALID_PATCH_INDEX;
 use crate::common::math::BoundingBox;
 use crate::common::point_set3d::{Color3B, Point3D, PointSet3};
 use crate::decoder::Patch;
@@ -241,7 +242,7 @@ impl PatchSegmenter {
         let max_allowed_depth = params.max_allowed_depth;
         let min_level = params.min_level;
         // let use_enhanced_occupancy_map_code = params.use_enhanced_occupancy_map_code;
-        // let create_sub_point_cloud = params.create_sub_point_cloud;
+        let create_sub_point_cloud = params.create_sub_point_cloud;
         let absolute_d1 = params.absolute_d1;
         let use_surface_separation = params.surface_separation;
         // let additional_projection_axis = params.additional_projection_plane_mode;
@@ -377,7 +378,7 @@ impl PatchSegmenter {
                         // Don't add it????
                         // Isn't this lossy
                         if connected_component.len() < min_point_count_per_cc {
-                            connected_components.resize(connected_components_index);
+                            connected_components.resize(connected_components_index, vec![]);
                         } else {
                             unimplemented!("print debug line here maybe?")
                         }
@@ -394,9 +395,69 @@ impl PatchSegmenter {
             if patch_expansion_enabled {
                 unimplemented!("patch expansion enabled")
             }
+
+            // ZICO: C++ version pass Patches from the frame context
+            // Might have to do that here too but for now lets create then return
+            let mut patches: Vec<Patch> = Vec::with_capacity(256);
+
             // Now we finally start creating the patch
             for connected_component in connected_components.iter() {
+                let patch_index = patches.len();
 
+                // ZICO: Is this technique faster?
+                // Why not instantiate a patch then push to patches
+                patches.resize(patch_index + 1, Patch::default());
+                let patch = patches.get_mut(patch_index).unwrap();
+
+                // ZICO: By right i need only d0 for now right?
+                let d0_count_per_patch: usize = 0;
+                let d1_count_per_patch: usize = 0;
+                let eom_count_per_patch: usize = 0;
+                patch.set_index(patch_index);
+
+                // ZICO: Skip EOM field, let's minimally update Patch struct
+                let cluster_index = partition[connected_component[0]];
+                let is_additional_projection_plane = cluster_index > 5;
+
+                // ZICO: Skip additional projection plane logic
+                patch.set_view_id(cluster_index as u8);
+                patch.set_best_match_idx(INVALID_PATCH_INDEX);
+
+                // Initialize GPAData
+                patch.cur_gpa_patch_data.initialize();
+                patch.pre_gpa_patch_data.initialize();
+
+                if params.enable_patch_splitting {
+                    unimplemented!("patch splitting")
+                }
+
+                let projection_direction_type: i16 = -2 * (patch.projection_mode as i16) + 1;
+
+                if patch_expansion_enabled {
+                    unimplemented!("patch expansion")
+                }
+
+                let mut bounding_box = BoundingBox::default();
+
+                // ZICO: Maybe make this default
+                for i in 0..=2 {
+                    bounding_box.max[i] = 0.0;
+                }
+
+                for &index in connected_component.iter() {
+                    // patch_partition map point index to the patch it belongs to
+                    // Why patch_index + 1? for 1-indexing?
+                    patch_partition[index] = patch_index + 1;
+                    if is_additional_projection_plane {
+                        unimplemented!("Additional Projection Plane");
+                    }
+                    let point = &points.positions[index];
+                    // ZICO: this can be made a method of bounding box
+                    for k in 0..=2 {
+                        if (point[k] as f64) < bounding_box.min[k] { bounding_box.min[k] = (point[k] as f64).floor() }
+                        if (point[k] as f64) > bounding_box.max[k] { bounding_box.max[k] = (point[k] as f64).ceil() }
+                    }
+                }
             }
         }
 
