@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::ffi::c_double;
 use cgmath::InnerSpace;
-use crate::common::INVALID_PATCH_INDEX;
+use num_traits::abs;
+use num_traits::real::Real;
+use crate::common::{INFINITE_DEPTH, INFINITE_NUMBER, INVALID_PATCH_INDEX};
 use crate::common::math::BoundingBox;
 use crate::common::point_set3d::{Color3B, Point3D, PointSet3};
 use crate::decoder::Patch;
@@ -236,12 +238,12 @@ impl PatchSegmenter {
         let quantizer_size_y = params.quantizer_size_y;
         let max_allowed_dist2_raw_points_detection = params.max_allowed_dist_2_raw_points_detection;
         let max_allowed_dist2_raw_points_selection = params.max_allowed_dist_2_raw_points_selection;
-        // let eom_single_layer_mode = params.eom_single_layer_mode;
+        let eom_single_layer_mode = params.eom_single_layer_mode;
         // let eom_fix_bit_count = params.eom_fix_bit_count;
         let surface_thickness = params.surface_thickness;
         let max_allowed_depth = params.max_allowed_depth;
         let min_level = params.min_level;
-        // let use_enhanced_occupancy_map_code = params.use_enhanced_occupancy_map_code;
+        let use_enhanced_occupancy_map_code = params.use_enhanced_occupancy_map_code;
         let create_sub_point_cloud = params.create_sub_point_cloud;
         let absolute_d1 = params.absolute_d1;
         let use_surface_separation = params.surface_separation;
@@ -334,10 +336,11 @@ impl PatchSegmenter {
         let number_of_eom: usize = 0;
 
         // Must go through all raw points
+        // Maybe made into function
         while !raw_points.is_empty() {
             // This algo go through all raw points. Group them into connected components
             // until not more raw points
-            let mut connected_components: Vec<Vec<usize>>;
+            let mut connected_components: Vec<Vec<usize>> = Vec::new();
             if !enable_point_cloud_partitioning {
                 let mut fifo: Vec<usize> = Vec::with_capacity(point_count);
                 // ZICO: flags for what? UPDATE: its just check if points have been visited
@@ -346,7 +349,8 @@ impl PatchSegmenter {
                 connected_components.reserve(256);
 
                 // ZICO: Must we go through all points for each connected components?
-                for index in raw_points.iter() {
+                for index in &raw_points {
+                    let index = *index;
                     if flags[index] && raw_points_distance[index] > max_allowed_dist2_raw_points_detection {
                         flags[index] = false;
                         let connected_components_index = connected_components.len();
@@ -354,23 +358,24 @@ impl PatchSegmenter {
                         let cluster_index = partition[index];
                         // Add an extra element
                         connected_components.resize(connected_components_index + 1, vec![]);
-                        let mut connected_component = &connected_components[connected_components_index];
+                        let mut connected_component = &mut connected_components[connected_components_index];
                         // Maybe copy the iterator instead of reference it
-                        fifo.push(*index);
-                        connected_component.push(*index);
+                        fifo.push(index);
+                        connected_component.push(index);
                         while !fifo.is_empty() {
                             let current = fifo.pop().unwrap();
-                            for neighbour in adj[current].iter() {
+                            for neighbour in &adj[current] {
+                                let neighbour = *neighbour;
                                 // If the neighbour is also within the same partition
                                 // and if the neighbour has not been in any connected components
                                 // we consider them to be in the same connected components
                                 // Current adj list implementation has point also be connected to itself
                                 // For now lets just add neigbour != current check
                                 // ZICO: come back to this latyer
-                                if partition[neighbour] == cluster_index && flags[neighbour] && *neighbour != current {
+                                if partition[neighbour] == cluster_index && flags[neighbour] && neighbour != current {
                                     flags[neighbour] = false;
-                                    fifo.push(*neighbour);
-                                    connected_component.push(*neighbour);
+                                    fifo.push(neighbour);
+                                    connected_component.push(neighbour);
                                 }
                             }
                         }
@@ -401,13 +406,14 @@ impl PatchSegmenter {
             let mut patches: Vec<Patch> = Vec::with_capacity(256);
 
             // Now we finally start creating the patch
+            // Maybe make this its own function?
             for connected_component in connected_components.iter() {
                 let patch_index = patches.len();
 
                 // ZICO: Is this technique faster?
                 // Why not instantiate a patch then push to patches
                 patches.resize(patch_index + 1, Patch::default());
-                let patch = patches.get_mut(patch_index).unwrap();
+                let mut patch = patches.get_mut(patch_index).unwrap();
 
                 // ZICO: By right i need only d0 for now right?
                 let d0_count_per_patch: usize = 0;
@@ -458,6 +464,167 @@ impl PatchSegmenter {
                         if (point[k] as f64) > bounding_box.max[k] { bounding_box.max[k] = (point[k] as f64).ceil() }
                     }
                 }
+
+                if enable_point_cloud_partitioning {
+                    unimplemented!("Enable Point Cloud Partitioning")
+                }
+                let normal_axis = patch.axes.0 as usize;
+                let tangent_axis = patch.axes.1 as usize;
+                let bitangent_axis = patch.axes.2 as usize;
+                patch.size_u = 1 + (bounding_box.max[tangent_axis].ceil() - bounding_box.min[tangent_axis].floor()) as usize;
+                patch.size_v = 1 + (bounding_box.max[bitangent_axis].ceil() - bounding_box.min[bitangent_axis].floor()) as usize;
+                patch.uv1.0 = bounding_box.min[tangent_axis] as usize;
+                patch.uv1.1 = bounding_box.min[bitangent_axis] as usize;
+                patch.d1 = if patch.projection_mode == 0 { INFINITE_DEPTH as usize } else { 0 };
+                patch.depth.0.resize(patch.size_u * patch.size_v, INFINITE_DEPTH);
+                patch.depth_0pc_idx.resize(patch.size_u * patch.size_v, INFINITE_NUMBER);
+                if use_enhanced_occupancy_map_code {
+                    unimplemented!("Enhanced Occupancy Map")
+                }
+                patch.occupancy_resolution = occupancy_resolution;
+                patch.size_uv0 = (0, 0);
+                patch._size_2d_in_pixel = (0, 0);
+                // Can parallelize
+                for i in connected_component {
+                    let i = *i;
+                    // let pointTmp = points.positions[i];
+                    if is_additional_projection_plane {
+                        unimplemented!("Additional Projection Plane")
+                    }
+                    let point = points.positions[i];
+                    // C++ version round down, but the values are all int
+                    let d = point[normal_axis] as i16;
+                    let u = point[tangent_axis] as usize - patch.uv1.0 ;
+                    let v = point[bitangent_axis] as usize - patch.uv1.1;
+                    assert!(u >= 0 && u < patch.size_u);
+                    assert!(v >= 0 && v < patch.size_v);
+                    let p = v * patch.size_u + u;
+                    let is_valid_point = if patch.projection_mode == 0 { patch.depth.0[p] > d }
+                    else { patch.depth.0[p] == INFINITE_DEPTH || patch.depth.0[p] < d};
+
+                    if is_valid_point {
+                        let mut minD0 = patch.d1;
+                        let mut maxD0 = patch.d1;
+                        patch.depth.0[p] = d;
+                        patch.depth_0pc_idx[p] = i as i64;
+                        patch._size_2d_in_pixel.0 = patch._size_2d_in_pixel.0.max(u);
+                        patch._size_2d_in_pixel.1 = patch._size_2d_in_pixel.1.max(v);
+                        patch.size_uv0.0 = patch.size_uv0.0.max(u / patch.occupancy_resolution);
+                        patch.size_uv0.1 = patch.size_uv0.1.max(v / patch.occupancy_resolution);
+                        minD0 = minD0.min(d as usize);
+                        maxD0 = maxD0.max(d as usize);
+                        if patch.projection_mode == 0 {
+                            patch.d1 = minD0 / min_level * min_level;
+                        } else {
+                            patch.d1 = (maxD0 as f64 / min_level as f64 * min_level as f64).ceil() as usize;
+                        }
+                    }
+                } // 1
+
+                patch._size_2d_in_pixel.0 += 1;
+                patch._size_2d_in_pixel.1 += 1;
+                let no_quantized_patch_size_2d_x_in_pixel = patch._size_2d_in_pixel.0;
+                let no_quantized_patch_size_2d_y_in_pixel = patch._size_2d_in_pixel.1;
+                if quantizer_size_x != 0 {
+                    patch._size_2d_in_pixel.0 = (no_quantized_patch_size_2d_x_in_pixel as f64 / quantizer_size_x as f64 * quantizer_size_x as f64).ceil() as usize;
+                }
+                if quantizer_size_y != 0 {
+                    patch._size_2d_in_pixel.1 = (no_quantized_patch_size_2d_y_in_pixel as f64 / quantizer_size_y as f64 * quantizer_size_y as f64).ceil() as usize;
+                }
+                patch.size_uv0.0 += 1;
+                patch.size_uv0.1 += 1;
+                patch.occupancy.resize(patch.size_uv0.0 * patch.size_uv0.1, false);
+
+                // filter depth
+                let mut peakPerBlock: Vec<i16> = Vec::new();
+                let peak_number = if patch.projection_mode == 0 { INFINITE_DEPTH } else { 0 };
+                peakPerBlock.resize(patch.size_uv0.0 * patch.size_uv0.1, peak_number);
+
+                // C++ version iterate through i64 but the patch.size and others use size_t
+                for v in 0..patch.size_v {
+                    for u in 0..patch.size_u {
+                        let p = v * patch.size_u + u;
+                        let depth0 = patch.depth.0[p];
+
+                        if depth0 == INFINITE_DEPTH {
+                            continue;
+                        }
+
+                        let u0 = u / patch.occupancy_resolution;
+                        let v0 = v / patch.occupancy_resolution;
+                        let p0 = v0 * patch.size_uv0.0 + u0;
+
+                        if patch.projection_mode == 0 {
+                            peakPerBlock[p0] = peakPerBlock[p0].min(depth0);
+                        } else {
+                            peakPerBlock[p0] = peakPerBlock[p0].max(depth0);
+                        }
+                    }
+                }
+
+                for v in 0..patch.size_v  {
+                    for u in 0..patch.size_u {
+                        let p = v * patch.size_u + u;
+                        let depth0 = patch.depth.0[p];
+
+                        if depth0 == INFINITE_DEPTH {
+                            continue;
+                        }
+
+                        let u0 = u / patch.occupancy_resolution;
+                        let v0 = v / patch.occupancy_resolution;
+                        let p0 = v0 * patch.size_uv0.0 + u0;
+
+                        let tmp_a = (depth0 - peakPerBlock[p0]).abs();
+                        let tmp_b = surface_thickness as i16 + projection_direction_type * depth0;
+                        let tmp_c = projection_direction_type * patch.d1 as i16 + max_allowed_depth as i16;
+
+                        if depth0 != INFINITE_DEPTH {
+                            if tmp_a > 32 || tmp_b > tmp_c {
+                                patch.depth.0[p] = INFINITE_DEPTH;
+                                patch.depth_0pc_idx[p] = INFINITE_NUMBER;
+                            }
+                        }
+                    }
+                }
+
+                if eom_single_layer_mode {
+                    unimplemented!("eom single layer mode");
+                } else {
+                    patch.depth.1 = patch.depth.0.clone();
+                    let patch_surface_thickness = surface_thickness;
+                    if use_surface_separation {
+                        unimplemented!("Use surface separation")
+                    }
+
+                    if patch_surface_thickness > 0 {
+                        for i in connected_component {
+                            let i = *i;
+                            // let pointTmp = points.positions[i];
+                            if is_additional_projection_plane {
+                                unimplemented!("Additional Projection Plane")
+                            }
+                            let point = points.positions[i];
+                            // C++ version round down, but the values are all int
+                            let d = point[normal_axis] as i16;
+                            let u = point[tangent_axis] as usize - patch.uv1.0 ;
+                            let v = point[bitangent_axis] as usize - patch.uv1.1;
+                            assert!(u >= 0 && u < patch.size_u);
+                            assert!(v >= 0 && v < patch.size_v);
+                            let p = v * patch.size_u + u;
+                            let depth0 = patch.depth.0[p];
+                            let deltaD = projection_direction_type * (d - depth0);
+                            // ZICO: C++ version do this instead of depth0 >= INFINITE DEPTH
+                            if !(depth0 < INFINITE_DEPTH) {continue};
+                            let is_color_similar = Self::colorSimilarity(
+                                &frame_pcc_color[i],
+                                &frame_pcc_color[patch.depth_0pc_idx[p]], 128);
+
+                        }
+                    }
+
+                }
+
             }
         }
 
@@ -494,6 +661,12 @@ impl PatchSegmenter {
         }
 
         adj_matrix
+    }
+
+    pub fn colorSimilarity(color_d1_candidate: &Color3B, color_d0: &Color3B, threshold: u8) -> bool {
+        (color_d0[0] as i16 - color_d1_candidate[0] as i16).abs() < threshold as i16 &&
+            (color_d0[1] as i16 - color_d1_candidate[1] as i16).abs() < threshold as i16 &&
+            (color_d0[2] as i16 - color_d1_candidate[2] as i16).abs() < threshold as i16
     }
 }
 #[cfg(test)]

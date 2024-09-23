@@ -727,7 +727,7 @@ pub(crate) enum PatchOrientation {
 // GPA means Geometry Parameter Adjustment I thn=ink
 // u0, v0 is the starting point of the pixel
 // ZICO: dunno if top-left, top-right, etc
-struct GPAPatchData {
+pub(crate) struct GPAPatchData {
     is_matched: bool,
     is_global_patch: bool,
     global_patch_index: i32,
@@ -783,11 +783,13 @@ pub(crate) struct Patch {
     size_d: usize,
     // /// size D pixel
     // size_d_pixel: usize,
+    pub(crate) size_u: usize, // size for depth
+    pub(crate) size_v: usize, // size for depth
     /// location in packed image (n * occupancy_resolution)
     pub(crate) uv0: (usize, usize),
     /// size of occupancy map (n * occupancy resolution)
     pub(crate) size_uv0: (usize, usize),
-    _size_2d_in_pixel: (usize, usize),
+    pub(crate) _size_2d_in_pixel: (usize, usize),
     pub(crate) occupancy_resolution: usize,
 
     /// (LodScaleX, LodScaleYIdc)
@@ -797,9 +799,9 @@ pub(crate) struct Patch {
     /// x: normal axis, y: tangent axis, z: bitangent axis
     pub(crate) axes: (u8, u8, u8),
     pub(crate) axis_of_additional_plane: u8,
-    // depth: (i16, i16),
+    pub(crate) depth: (Vec<i16>, Vec<i16>),
     // /// occupancy map
-    // occupancy: Vec<bool>,
+    pub(crate) occupancy: Vec<bool>,
     // /// view_id in 0..=5
     pub(crate) view_id: u8,
     // /// index of matched patch from pre-frame patch
@@ -809,7 +811,7 @@ pub(crate) struct Patch {
     // /// Enhance delta depth
     // depth_eom: Vec<i16>,
     // /// for surface separation
-    // depth_0pc_idx: Vec<i64>,
+    pub(crate) depth_0pc_idx: Vec<i64>,
     /// patch orientation in canvas atlas
     pub(crate) patch_orientation: PatchOrientation,
     // point_local_reconstruction_lvl: u8,
