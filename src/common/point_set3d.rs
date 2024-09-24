@@ -1,5 +1,6 @@
 use cgmath::{point1, Vector3};
 use unzip3::Unzip3;
+use crate::encoder::Vector3D;
 
 pub type Point3D = Vector3<u16>;
 pub type Color3B = Vector3<u8>;
@@ -64,6 +65,19 @@ impl PointSet3 {
     /// add point to PointSet, and allocate the rest of the structure and returns its index
     pub(crate) fn add_point(&mut self, position: Point3D) -> usize {
         self.positions.push(position);
+        if self.with_colors {
+            self.colors.push(Color3B::new(127, 127, 127));
+            self.colors16bit.push(Color16bit::new(0, 0, 0));
+        }
+        if self.with_normals {
+            self.normals.push(Normal3D::new(0.0, 0.0, 0.0));
+        }
+        self.point_patch_indexes.push((0, 0));
+        self.positions.len() - 1
+    }
+
+    pub(crate) fn add_point_from_vector_3d(&mut self, position: Vector3D) -> usize {
+        self.positions.push(Point3D::new(position.x as u16, position.y as u16, position.x as u16));
         if self.with_colors {
             self.colors.push(Color3B::new(127, 127, 127));
             self.colors16bit.push(Color16bit::new(0, 0, 0));

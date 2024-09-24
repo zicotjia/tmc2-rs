@@ -1,6 +1,9 @@
+use std::cmp::min;
 use std::collections::HashMap;
 use std::ffi::c_double;
 use cgmath::InnerSpace;
+use fast_math::log2;
+use kdtree::KdTree;
 use num_traits::abs;
 use num_traits::real::Real;
 use crate::common::{INFINITE_DEPTH, INFINITE_NUMBER, INVALID_PATCH_INDEX};
@@ -225,9 +228,9 @@ impl PatchSegmenter {
         patch_partition: &mut Vec<usize>,
         resampled_patch_partition: &mut Vec<usize>,
         mut raw_points: Vec<usize>,
-        resampled: &PointSet3,
+        resampled: &mut PointSet3,
         sub_point_cloud: &mut Vec<PointSet3>,
-        distance_source_rec: &f32,
+        distance_source_rec: &mut f32,
         orientations: &[Vector3D; 6],
         orientation_count: usize
     ) {
@@ -239,7 +242,7 @@ impl PatchSegmenter {
         let max_allowed_dist2_raw_points_detection = params.max_allowed_dist_2_raw_points_detection;
         let max_allowed_dist2_raw_points_selection = params.max_allowed_dist_2_raw_points_selection;
         let eom_single_layer_mode = params.eom_single_layer_mode;
-        // let eom_fix_bit_count = params.eom_fix_bit_count;
+        let eom_fix_bit_count = params.eom_fix_bit_count;
         let surface_thickness = params.surface_thickness;
         let max_allowed_depth = params.max_allowed_depth;
         let min_level = params.min_level;
@@ -271,7 +274,6 @@ impl PatchSegmenter {
 
         patch_partition.resize(point_count, 0);
         resampled_patch_partition.reserve(point_count);
-        let mut nn_result: NNResult;
         let mut frame_pcc_color: Vec<Color3B> = Vec::new();
         frame_pcc_color.reserve(point_count);
         assert!(&points.with_colors);
@@ -281,8 +283,8 @@ impl PatchSegmenter {
         // ZICO: Ignore enable cloud partitioning
 
         // ZICO: does d0 refer to original point clouds and d1 refer to after processing?
-        let num_d0_points = 0;
-        let num_d1_points = 0;
+        let mut num_d0_points = 0;
+        let mut num_d1_points = 0;
 
         // Compute adjacency info
         let mut adj: Vec<Vec<usize>> = Vec::new();                     // Adjacency list
@@ -313,7 +315,7 @@ impl PatchSegmenter {
             }
         }
         // Extract Patches
-        let raw_points_distance: Vec<f64> = vec![f64::MAX; point_count];
+        let mut raw_points_distance: Vec<f64> = vec![f64::MAX; point_count];
         raw_points = (0..point_count).collect();
         let raw_points_chunks: Vec<Vec<usize>>;
         let raw_points_distance_chunks: Vec<Vec<f64>>;
@@ -333,7 +335,7 @@ impl PatchSegmenter {
         let mut mean_vba: f64 = 0.0;
         let test_source_num: usize = 0;
         let test_reconstructed_num: usize = 0;
-        let number_of_eom: usize = 0;
+        let mut number_of_eom: usize = 0;
 
         // Must go through all raw points
         // Maybe made into function
@@ -416,9 +418,9 @@ impl PatchSegmenter {
                 let mut patch = patches.get_mut(patch_index).unwrap();
 
                 // ZICO: By right i need only d0 for now right?
-                let d0_count_per_patch: usize = 0;
-                let d1_count_per_patch: usize = 0;
-                let eom_count_per_patch: usize = 0;
+                let mut d0_count_per_patch: usize = 0;
+                let mut d1_count_per_patch: usize = 0;
+                let mut eom_count_per_patch: usize = 0;
                 patch.set_index(patch_index);
 
                 // ZICO: Skip EOM field, let's minimally update Patch struct
@@ -612,22 +614,285 @@ impl PatchSegmenter {
                             assert!(u >= 0 && u < patch.size_u);
                             assert!(v >= 0 && v < patch.size_v);
                             let p = v * patch.size_u + u;
-                            let depth0 = patch.depth.0[p];
-                            let deltaD = projection_direction_type * (d - depth0);
+                            let depth_0 = patch.depth.0[p];
+                            let delta_d = projection_direction_type * (d - depth_0);
                             // ZICO: C++ version do this instead of depth0 >= INFINITE DEPTH
-                            if !(depth0 < INFINITE_DEPTH) {continue};
+                            if !(depth_0 < INFINITE_DEPTH) {continue};
                             let is_color_similar = Self::colorSimilarity(
                                 &frame_pcc_color[i],
-                                &frame_pcc_color[patch.depth_0pc_idx[p]], 128);
+                                &frame_pcc_color[patch.depth_0pc_idx[p] as usize], 128);
+                            if depth_0 < INFINITE_DEPTH
+                                && delta_d <= patch_surface_thickness as i16
+                                && delta_d >= 0 && is_color_similar {
+                                if (projection_direction_type * (d - patch.depth.1[p])) > 0 {
+                                    patch.depth.1.resize(p, d);
+                                }
+                                if use_enhanced_occupancy_map_code {
+                                    unimplemented!("enhanced occupancy map")
+                                }
+                            }
+                            if patch.projection_mode == 0 && patch.depth.1[p] < patch.depth.0[p]
+                                || patch.projection_mode == 1 && patch.depth.1[p] > patch.depth.0[p] {
+                                println!(
+                                    "ERROR: d1({}) and d0({}) for projection mode[{}]",
+                                    patch.depth.1[p],
+                                    patch.depth.0[p],
+                                    patch.projection_mode
+                                );
+                            }
+                        }
+                    }
+                }
+                patch.size_d = 0;
+                let mut rec: PointSet3 = PointSet3::default();
+                // ZICO: C++ version resize to 0, dunno whats the advantage
+                let mut point_count: Vec<usize> = Vec::new();
+                point_count.resize(3, 0);
+                Self::resample_point_cloud(
+                    &mut point_count, resampled, resampled_patch_partition, patch,
+                    patch_index, params.map_count_minus_1 > 0, surface_thickness,
+                    eom_fix_bit_count, is_additional_projection_plane, use_enhanced_occupancy_map_code,
+                    geometry_bit_depth_3d, create_sub_point_cloud, &mut rec
+                );
 
+                d0_count_per_patch = point_count[0];
+                d1_count_per_patch = point_count[1];
+                eom_count_per_patch = point_count[2];
+
+                patch.size_d_pixel = patch.size_d;
+                patch.size_d = min((1 << min(geometry_bit_depth_2d, geometry_bit_depth_3d)) - 1, patch.size_d);
+                let bit_depth_d = min(geometry_bit_depth_3d, geometry_bit_depth_2d) - log2(min_level as f32) as usize;
+                let max_dd_plus_1 = 1 << bit_depth_d;
+                let mut quant_dd = if patch.size_d == 0 { 0 } else { (patch.size_d - 1) / min_level + 1};
+                quant_dd = min(quant_dd, max_dd_plus_1 - 1);
+                patch.size_d = if quant_dd == 0 { 0 } else { quant_dd * min_level - 1};
+
+                if create_sub_point_cloud {
+                    unimplemented!("Sub point cloud")
+                }
+                if eom_single_layer_mode { d1_count_per_patch = 0 }
+                patch.eom_and_d1_count = eom_count_per_patch;
+                if use_enhanced_occupancy_map_code {
+                    unimplemented!("Enhancy Occupancy Map")
+                }
+                patch.d0_count = d0_count_per_patch;
+                number_of_eom += eom_count_per_patch - d1_count_per_patch;
+                num_d0_points += d0_count_per_patch;
+                num_d1_points += d1_count_per_patch;
+                if use_enhanced_occupancy_map_code {
+                    unimplemented!("Enhancy Occupancy Map")
+                }
+                println!(
+                    "\t\t Patch {} ->(d1,u1,v1)=({}, {}, {})(dd,du,dv)=({}, {}, {}), Normal: {}, Direction: {}, EOM: {}",
+                    patch_index, patch.d1, patch.uv1.0, patch.uv1.1, patch.size_d,
+                    patch.size_u, patch.size_v, patch.axes.0 as usize, patch.projection_mode, patch.eom_and_d1_count
+                );
+            }
+            let mut kd_tree_resampled = PCCKdTree::new();
+            kd_tree_resampled.build_from_point_set(resampled);
+            raw_points.clear();
+            // ZICO: I think this one check the distance diff between resampled and original
+            // Should double check if nanoflann use square distance
+            for i in 0..point_count {
+                let result = kd_tree_resampled.search(&points.positions[i], 1);
+                let dist2 = result.squared_dists[0];
+                raw_points_distance[i] = dist2;
+                if dist2 > max_allowed_dist2_raw_points_selection { raw_points.push(i); }
+            }
+            if enable_point_cloud_partitioning {
+                unimplemented!("Point Cloud Partitioning")
+            }
+            println!(" # patches {}", patches.len());
+            println!(" # resampled {}", resampled.point_count());
+            println!(" # raw points {}", raw_points.len());
+            if use_enhanced_occupancy_map_code {
+                println!(" # EOM points {}", number_of_eom);
+            }
+        }
+        // ZICO: C++ version did a lossy conversion from f64 to f32
+        *distance_source_rec = (mean_yab + mean_uab + mean_vab + mean_yba + mean_uba + mean_vba) as f32;
+    }
+
+    pub fn resample_point_cloud(
+        point_count: &mut Vec<usize>,
+        resampled: &mut PointSet3,
+        resampled_patch_partition: &mut Vec<usize>,
+        patch: &mut Patch,
+        patch_index: usize,
+        multiple_maps: bool,
+        surface_thickness: usize,
+        eom_fix_bit_count: usize,
+        is_additional_projection_plane: bool,
+        use_enhanced_occupancy_map_code: bool,
+        geometry_bit_depth_3d: usize,
+        create_sub_point_cloud: bool,
+        rec: &mut PointSet3,
+    ) {
+        let normal_axis = patch.axes.0 as usize;
+        let tangent_axis = patch.axes.1 as usize;
+        let bitangent_axis = patch.axes.2 as usize;
+        point_count.resize(3, 0);
+        let mut d0_count_per_patch = 0;
+        let mut d1_count_per_patch = 0;
+        let mut eom_count_per_patch = 0;
+
+        // projection = 0 -> 1, projection = 1 -> -1
+        // ZICO: Dunno this significance
+        let projection_type_indication = -2 * (patch.projection_mode as i16) + 1;
+
+        for v in 0..patch.size_v {
+            for u in 0..patch.size_u {
+                let p = v * patch.size_u + u;
+                if patch.depth.0[p] < INFINITE_DEPTH {
+                    let depth0 = patch.depth.0[p] as i16;
+
+                    // Add depth0
+                    let u0 = u / patch.occupancy_resolution;
+                    let v0 = v / patch.occupancy_resolution;
+                    let p0 = v0 * patch.size_uv0.0 + u0;
+                    assert!(u0 < patch.size_uv0.0);
+                    assert!(v0 < patch.size_uv0.0);
+
+                    patch.occupancy[p0] = true;
+
+                    // ZICO: Should prolly make this Point3D
+                    let mut point = Vector3D::new(0.0, 0.0, 0.0);
+                    point[normal_axis] = depth0 as f64;
+                    point[tangent_axis] = u as f64 + patch.uv1.0 as f64;
+                    point[bitangent_axis] = v as f64 + patch.uv1.1 as f64;
+
+                    if is_additional_projection_plane {
+                        unimplemented!("Additional Projection Plane")
+                        // let point_tmp = Self::iconvert(
+                        //     patch.axis_of_additional_plane,
+                        //     geometry_bit_depth_3d,
+                        //     &point,
+                        // ).unwrap();
+                        // resampled.add_point_from_vector_3d(point_tmp);
+                        // resampled_patch_partition.push(patch_index);
+                        // if create_sub_point_cloud {
+                        //     rec.add_point_from_vector_3d(point_tmp);
+                        // }
+                    } else {
+                        resampled.add_point_from_vector_3d(point);
+                        resampled_patch_partition.push(patch_index);
+                        if create_sub_point_cloud {
+                            unimplemented!("Create Sub Point Cloud")
+                            // rec.add_point_from_vector_3d(point);
                         }
                     }
 
-                }
+                    d0_count_per_patch += 1;
 
+                    // Add EOM
+                    let mut point_eom = point.clone();
+                    if use_enhanced_occupancy_map_code && patch.depth_eom[p] != 0 {
+                        unimplemented!("Use Enhanced Occupancy Map")
+                    //     let n = if multiple_maps {
+                    //         surface_thickness
+                    //     } else {
+                    //         eom_fix_bit_count
+                    //     };
+                    //
+                    //     for i in 0..n {
+                    //         if patch.depth_eom[p] & (1 << i) != 0 {
+                    //             let n_delta_d_cur = (i + 1) as i16;
+                    //             point_eom[normal_axis] =
+                    //                 depth0 as f64 + projection_type_indication as f64 * (n_delta_d_cur as f64);
+                    //
+                    //             if point_eom[normal_axis] != point[normal_axis] {
+                    //                 if is_additional_projection_plane {
+                    //                     let mut point_tmp = Self::iconvert(
+                    //                         patch.axis_of_additional_plane,
+                    //                         geometry_bit_depth_3d,
+                    //                         &point_eom,
+                    //                     ).unwrap();
+                    //                     resampled.add_point_from_vector_3d(point_tmp);
+                    //                     resampled_patch_partition.push(patch_index);
+                    //                 } else {
+                    //                     resampled.add_point_from_vector_3d(point_eom.clone());
+                    //                     resampled_patch_partition.push(patch_index);
+                    //                 }
+                    //                 eom_count_per_patch += 1;
+                    //             }
+                    //         }
+                    //     }
+                    }
+
+                    // Add depth1
+                    if !(use_enhanced_occupancy_map_code && !multiple_maps) {
+                        let depth1 = patch.depth.1[p] as i16;
+                        point[normal_axis] = depth1 as f64;
+                        if patch.depth.0[p] != patch.depth.1[p] {
+                            d1_count_per_patch += 1;
+                        }
+                        if is_additional_projection_plane {
+                            let point_tmp = Self::iconvert(
+                                patch.axis_of_additional_plane,
+                                geometry_bit_depth_3d,
+                                &point,
+                            ).unwrap();
+                            resampled.add_point_from_vector_3d(point_tmp);
+                            resampled_patch_partition.push(patch_index);
+                            if create_sub_point_cloud {
+                                unimplemented!("Create Sub PointCloud");
+                                rec.add_point_from_vector_3d(point_tmp);
+                            }
+                        } else if !use_enhanced_occupancy_map_code
+                            || point_eom[normal_axis] != point[normal_axis]
+                        {
+                            resampled.add_point_from_vector_3d(point.clone());
+                            resampled_patch_partition.push(patch_index);
+                            if create_sub_point_cloud {
+                                rec.add_point_from_vector_3d(point);
+                            }
+                        }
+                        assert!(
+                            (patch.depth.0[p] as i32 - patch.depth.1[p] as i32).abs() <= surface_thickness as i32
+                        );
+                    }
+
+                    // Adjust depth(0), depth(1)
+                    patch.depth.0[p] = projection_type_indication * (patch.depth.0[p] as i16 - patch.d1 as i16);
+                    patch.size_d = patch.size_d.max(patch.depth.0[p] as usize);
+
+                    if !(use_enhanced_occupancy_map_code && !multiple_maps) {
+                        patch.depth.1[p] = projection_type_indication * (patch.depth.1[p] as i16 - patch.d1 as i16);
+                        patch.size_d = patch.size_d.max(patch.depth.1[p] as usize);
+                    }
+                }
             }
         }
 
+        point_count[0] = d0_count_per_patch;
+        point_count[1] = d1_count_per_patch;
+        point_count[2] = eom_count_per_patch;
+    }
+
+    pub fn iconvert(axis: u8, lod: usize, input: &Vector3D) -> Result<Vector3D, &'static str> {
+        let shif: f64 = (1 << (lod - 1)) as f64 - 1.0;
+        let (output_x, output_y, output_z) = match axis {
+            1 => {
+                let output_x = (input.x - input.z + shif) / 2.0;
+                let output_y = input.y;
+                let output_z = (input.x + input.z - shif) / 2.0;
+                (output_x, output_y, output_z)
+            },
+            2 => {
+                let output_x = input.x;
+                let output_y = (input.z + input.y - shif) / 2.0;
+                let output_z = (input.z - input.y + shif) / 2.0;
+                (output_x, output_y, output_z)
+            },
+            3 => {
+                let output_x = (input.y + input.x - shif) / 2.0;
+                let output_y = (input.y - input.x + shif) / 2.0;
+                let output_z = input.z;
+                (output_x, output_y, output_z)
+            },
+            _ => return Err("Invalid axis. Axis must be 1, 2, or 3."),
+        };
+        Ok(Vector3D::new(output_x, output_y, output_z))
     }
 
     // Connect points with their nearest neighbour

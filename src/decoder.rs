@@ -780,9 +780,9 @@ pub(crate) struct Patch {
     /// d1: depth shift
     pub(crate) d1: usize,
     /// size for depth
-    size_d: usize,
+    pub(crate) size_d: usize,
     // /// size D pixel
-    // size_d_pixel: usize,
+    pub(crate) size_d_pixel: usize,
     pub(crate) size_u: usize, // size for depth
     pub(crate) size_v: usize, // size for depth
     /// location in packed image (n * occupancy_resolution)
@@ -809,7 +809,7 @@ pub(crate) struct Patch {
     // ref_atlas_frame_idx: usize,
     // pred_type: usize,
     // /// Enhance delta depth
-    // depth_eom: Vec<i16>,
+    pub(crate) depth_eom: Vec<i16>,
     // /// for surface separation
     pub(crate) depth_0pc_idx: Vec<i64>,
     /// patch orientation in canvas atlas
@@ -821,9 +821,10 @@ pub(crate) struct Patch {
     pub(crate) cur_gpa_patch_data: GPAPatchData,
     pub(crate) pre_gpa_patch_data: GPAPatchData,
     // is_global_patch: bool,
-    // d0_count: usize,
-    // eom_count: usize,
-    // eom_and_d1_count: usize,
+    pub(crate) d0_count: usize,
+    pub(crate) eom_count: usize,
+    // ZICO: Why do we eom_count then eom_and_d1_count?
+    pub(crate) eom_and_d1_count: usize,
     pub(crate) patch_type: PatchModePTile,
     // is_roi_patch: bool,
     // roi_index: usize,
