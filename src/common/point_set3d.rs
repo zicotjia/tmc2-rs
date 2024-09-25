@@ -52,7 +52,7 @@ impl From<Vec<vivotk::formats::pointxyzrgbanormal::PointXyzRgbaNormal>> for Poin
                 Color3B {x: point.r, y: point.g, z: point.b},
                 Normal3D {x: point.nx as f64, y: point.ny as f64, z: point.z as f64})
             ).unzip3();
-        PointSet3 { positions, colors, colors16bit: vec![], point_patch_indexes: vec![], normals, with_normals: false, with_colors: false }
+        PointSet3 { positions, colors, colors16bit: vec![], point_patch_indexes: vec![], normals, with_normals: true, with_colors: true }
     }
 }
 

@@ -1,9 +1,10 @@
 use std::cmp::min;
 use std::collections::HashMap;
 use std::ffi::c_double;
-use cgmath::InnerSpace;
+use cgmath::{InnerSpace, Vector3};
 use fast_math::log2;
 use kdtree::KdTree;
+use log::debug;
 use num_traits::abs;
 use num_traits::real::Real;
 use crate::common::{INFINITE_DEPTH, INFINITE_NUMBER, INVALID_PATCH_INDEX};
@@ -16,7 +17,7 @@ use crate::encoder::kd_tree::{NNResult, PCCKdTree};
 
 type Voxels = HashMap<u64, Vec<usize>>;
 
-struct PatchSegmenterParams {
+pub struct PatchSegmenterParams {
     pub grid_based_segmentation: bool,
     pub voxel_dimension_grid_based_segmentation: usize,
     pub nn_normal_estimation: usize,
@@ -68,6 +69,63 @@ struct PatchSegmenterParams {
     pub num_cuts_along_2nd_longest_axis: i32,
     pub num_cuts_along_3rd_longest_axis: i32,
 }
+
+impl Default for PatchSegmenterParams {
+    fn default() -> Self {
+        PatchSegmenterParams {
+            grid_based_segmentation: false,
+            voxel_dimension_grid_based_segmentation: 2,
+            nn_normal_estimation: 16,
+            normal_orientation: 1,
+            grid_based_refine_segmentation: false,
+            max_nn_count_refine_segmentation: 256,
+            iteration_count_refine_segmentation: 10,
+            voxel_dimension_refine_segmentation: 4,
+            search_radius_refine_segmentation: 192,
+            occupancy_resolution: 16,
+            enable_patch_splitting: false,
+            max_patch_size: 1024,
+            quantizer_size_x: 1 << 4,
+            quantizer_size_y: 1 << 4,
+            min_point_count_per_cc_patch_segmentation: 16,
+            max_nn_count_patch_segmentation: 16,
+            surface_thickness: 4,
+            eom_fix_bit_count: 0,
+            eom_single_layer_mode: false,
+            map_count_minus_1: 1,
+            min_level: 64,
+            max_allowed_depth: 0,
+            max_allowed_dist_2_raw_points_detection: 9.0,
+            max_allowed_dist_2_raw_points_selection: 1.0,
+            lambda_refine_segmentation: 3.0,
+            use_enhanced_occupancy_map_code: false,
+            absolute_d1: false,
+            create_sub_point_cloud: false,
+            surface_separation: false,
+            weight_normal: Vector3 { x: 1.0, y: 1.0, z: 1.0 },
+            additional_projection_plane_mode: 0,
+            partial_additional_projection_plane: 0.0,
+            geometry_bit_depth_2d: 8,
+            geometry_bit_depth_3d: 10,
+            patch_expansion: false,
+            high_gradient_separation: false,
+            min_gradient: 15.0,
+            min_num_high_gradient_points: 256,
+            enable_point_cloud_partitioning: false,
+            roi_bounding_box_min_x: vec![],
+            roi_bounding_box_max_x: vec![],
+            roi_bounding_box_min_y: vec![],
+            roi_bounding_box_max_y: vec![],
+            roi_bounding_box_min_z: vec![],
+            roi_bounding_box_max_z: vec![],
+            num_tiles_hor: 2,
+            tile_height_to_width_ratio: 1.0,
+            num_cuts_along_1st_longest_axis: 0,
+            num_cuts_along_2nd_longest_axis: 0,
+            num_cuts_along_3rd_longest_axis: 0,
+        }
+    }
+}
 #[derive(Clone, Default)]
 pub struct PatchSegmenter {
     pub nb_thread: usize,
@@ -75,10 +133,12 @@ pub struct PatchSegmenter {
     pub box_max_depths: Vec<Patch>
 }
 impl PatchSegmenter {
-    fn compute(
-        geometry: PointSet3,
-        // frame_index: usize,
-        params: PatchSegmenterParams
+    pub fn compute(
+        geometry: &PointSet3,
+        frame_index: usize,
+        params: PatchSegmenterParams,
+        sub_point_cloud: &mut Vec<PointSet3>,
+        distance_src_rec: &mut f32
     ) {
         // Determine Orientation
         // ZICO: For now assume only the base 6 projection plane
@@ -86,7 +146,7 @@ impl PatchSegmenter {
         let orientations_count = orientations6Count;
         let geometry_vox;
 
-        // ZICO: For now assumes gridBasedSegmentation is ff
+        // ZICO: For now assumes gridBasedSegmentation is off
         if params.grid_based_segmentation {
             unimplemented!("Grid based segmentation (Voxelization")
         } else {
@@ -99,7 +159,7 @@ impl PatchSegmenter {
         }
         assert!(geometry_vox.with_normals);
 
-        let partition: Vec<usize>;
+        let mut partition: Vec<usize>;
         // Initial Segmentation
         if params.additional_projection_plane_mode == 0 {
             partition = Self::initial_segmentation(&geometry_vox, &orientations, orientations_count, &params.weight_normal)
@@ -111,22 +171,26 @@ impl PatchSegmenter {
         let mut kd_tree = PCCKdTree::new();
         kd_tree.build_from_point_set(&geometry_vox);
 
-
-
         // ZICO: For now lets skip all segmentation refinement
-        // if params.grid_based_refine_segmentation {
-        //     unimplemented!("grid-based refine segmentation")
-        // } else {
-        //     unimplemented!("refine segmentation")
-        // }
+        if params.grid_based_refine_segmentation {
+            unimplemented!("grid-based refine segmentation")
+        } else {
+            Self::refine_segmentation(
+                geometry_vox, &kd_tree, &orientations, orientations_count, params.max_nn_count_refine_segmentation,
+                params.lambda_refine_segmentation, params.iteration_count_refine_segmentation, &mut partition
+            )
+        }
+
+        if params.grid_based_segmentation {
+            unimplemented!("Grid Based Segmentation")
+        }
 
         // ZICO: Implement Segment Patches
 
-        // let resampled = PointSet3::default();
-        // let patchPartition: Vec<usize>;
-        // let resampledPatchPartition: Vec<usize>;
-        // let rawPoints: Vec<usize>;
-
+        let patches = Self::segment_patches(
+            geometry, &kd_tree, &params, &mut partition, sub_point_cloud, distance_src_rec,
+            &orientations, orientations_count
+        );
 
     }
 
@@ -220,20 +284,126 @@ impl PatchSegmenter {
         partition
     }
 
+    pub fn refine_segmentation(
+        points: &PointSet3,
+        kd_tree: &PCCKdTree,
+        orientations: &[Vector3D; 6],
+        orientations_count: usize,
+        max_nn_count: usize,
+        lambda: f64,
+        iteration_count: usize,
+        partition: &mut Vec<usize>
+    ) {
+        let adj = Self::compute_adjacency_info(points, kd_tree, max_nn_count);
+        let point_count = points.point_count();
+        let weight = lambda / max_nn_count as f64;
+        let mut temp_partition: Vec<usize> = vec![0; point_count];
+
+        #[cfg(feature = "use_rayon")]
+        {
+            use rayon::prelude::*;
+
+            for _k in 0..iteration_count {
+                let temp_scores_smooth: Vec<Vec<usize>> = (0..point_count)
+                    .into_par_iter()
+                    .map(|i| {
+                        let mut score_smooth = vec![0; orientations_count];
+                        for &neighbor in &adj[i] {
+                            score_smooth[partition[neighbor]] += 1;
+                        }
+                        score_smooth
+                    })
+                    .collect();
+
+                temp_partition
+                    .par_iter_mut()
+                    .enumerate()
+                    .for_each(|(i, cluster_index)| {
+                        let normal = points.normals[i];
+                        let mut best_cluster_index = *cluster_index;
+                        let mut best_score = 0.0;
+                        let score_smooth = &temp_scores_smooth[i]; // Immutable access
+
+                        for j in 0..orientations_count {
+                            let score_normal = normal.dot(orientations[j]); // assuming dot product method
+                            let score = score_normal + weight * score_smooth[j] as f64;
+
+                            if score > best_score {
+                                best_score = score;
+                                best_cluster_index = j;
+                            }
+                        }
+
+                        *cluster_index = best_cluster_index;
+                    });
+
+                // 3. Swap partitions
+                std::mem::swap(partition, &mut temp_partition);
+            }
+        }
+        
+        #[cfg(not(feature = "use_rayon"))]
+        {
+            let mut scores_smooth: Vec<Vec<usize>> = vec![vec![0; orientations_count]; point_count];
+            for _k in 0..iteration_count {
+                // Sequential section to process scoresSmooth
+                for i in 0..point_count {
+                    let score_smooth = &mut scores_smooth[i];
+                    score_smooth.fill(0);
+                    for &neighbor in &adj[i] {
+                        score_smooth[partition[neighbor]] += 1;
+                    }
+                }
+
+                // Sequential section to update partition based on normals and scores
+                for i in 0..point_count {
+                    let normal = points.normals[i];
+                    let mut cluster_index = partition[i];
+                    let mut best_score = 0.0;
+                    let score_smooth = &scores_smooth[i];
+
+                    for j in 0..orientations_count {
+                        let score_normal = normal.dot(orientations[j]); // assuming dot product method
+                        let score = score_normal + weight * score_smooth[j] as f64;
+
+                        if score > best_score {
+                            best_score = score;
+                            cluster_index = j;
+                        }
+                    }
+
+                    temp_partition[i] = cluster_index;
+                }
+
+                // Swap partitions
+                std::mem::swap(partition, &mut temp_partition);
+            }
+
+            // Clear scoresSmooth vectors
+            for vector in &mut scores_smooth {
+                vector.clear();
+            }
+        }
+    }
+
     pub fn segment_patches(
         points: &PointSet3,
         kd_tree: &PCCKdTree,
         params: &PatchSegmenterParams,
         partition: &mut Vec<usize>,
-        patch_partition: &mut Vec<usize>,
-        resampled_patch_partition: &mut Vec<usize>,
-        mut raw_points: Vec<usize>,
-        resampled: &mut PointSet3,
         sub_point_cloud: &mut Vec<PointSet3>,
         distance_source_rec: &mut f32,
         orientations: &[Vector3D; 6],
         orientation_count: usize
-    ) {
+    ) -> Vec<Patch>  {
+        // ZICO: C++ version pass alot of stuff from the frame context
+        // Might have to do that here too but for now lets create then return
+        let mut patches: Vec<Patch> = Vec::with_capacity(256);
+        let mut resampled = PointSet3::default();
+        let mut patch_partition: Vec<usize> = vec![];
+        let mut resampled_patch_partition: Vec<usize> = vec![];
+        let mut raw_points: Vec<usize> = vec![];
+
         let max_nn_count = params.max_nn_count_patch_segmentation;
         let min_point_count_per_cc = params.min_point_count_per_cc_patch_segmentation;
         let occupancy_resolution = params.occupancy_resolution;
@@ -255,20 +425,20 @@ impl PatchSegmenter {
         let geometry_bit_depth_3d = params.geometry_bit_depth_3d;
         let patch_expansion_enabled = params.patch_expansion;
         let high_gradient_separation = params.high_gradient_separation;
-        let min_gradient = params.min_gradient;
-        let min_num_high_gradient_points = params.min_num_high_gradient_points;
+        // let min_gradient = params.min_gradient;
+        // let min_num_high_gradient_points = params.min_num_high_gradient_points;
         let enable_point_cloud_partitioning = params.enable_point_cloud_partitioning;
 
-        let mut roi_bounding_box_min_x = params.roi_bounding_box_min_x.clone();
-        let mut roi_bounding_box_max_x = params.roi_bounding_box_max_x.clone();
-        let mut roi_bounding_box_min_y = params.roi_bounding_box_min_y.clone();
-        let mut roi_bounding_box_max_y = params.roi_bounding_box_max_y.clone();
-        let mut roi_bounding_box_min_z = params.roi_bounding_box_min_z.clone();
-        let mut roi_bounding_box_max_z = params.roi_bounding_box_max_z.clone();
-
-        let mut num_cuts_along_1st_longest_axis = params.num_cuts_along_1st_longest_axis;
-        let mut num_cuts_along_2nd_longest_axis = params.num_cuts_along_2nd_longest_axis;
-        let mut num_cuts_along_3rd_longest_axis = params.num_cuts_along_3rd_longest_axis;
+        // let mut roi_bounding_box_min_x = params.roi_bounding_box_min_x.clone();
+        // let mut roi_bounding_box_max_x = params.roi_bounding_box_max_x.clone();
+        // let mut roi_bounding_box_min_y = params.roi_bounding_box_min_y.clone();
+        // let mut roi_bounding_box_max_y = params.roi_bounding_box_max_y.clone();
+        // let mut roi_bounding_box_min_z = params.roi_bounding_box_min_z.clone();
+        // let mut roi_bounding_box_max_z = params.roi_bounding_box_max_z.clone();
+        //
+        // let mut num_cuts_along_1st_longest_axis = params.num_cuts_along_1st_longest_axis;
+        // let mut num_cuts_along_2nd_longest_axis = params.num_cuts_along_2nd_longest_axis;
+        // let mut num_cuts_along_3rd_longest_axis = params.num_cuts_along_3rd_longest_axis;
 
         let point_count = points.point_count();
 
@@ -339,9 +509,17 @@ impl PatchSegmenter {
 
         // Must go through all raw points
         // Maybe made into function
+
+
+        // pub fn process_raw_points(
+        //     raw_points: &Vec<f64>,
+        //
+        // )
+        /// Process Raw Points
+        ///
         while !raw_points.is_empty() {
             // This algo go through all raw points. Group them into connected components
-            // until not more raw points
+            // until no more raw points
             let mut connected_components: Vec<Vec<usize>> = Vec::new();
             if !enable_point_cloud_partitioning {
                 let mut fifo: Vec<usize> = Vec::with_capacity(point_count);
@@ -351,6 +529,7 @@ impl PatchSegmenter {
                 connected_components.reserve(256);
 
                 // ZICO: Must we go through all points for each connected components?
+                println!("num raw points: {}", raw_points.len());
                 for index in &raw_points {
                     let index = *index;
                     if flags[index] && raw_points_distance[index] > max_allowed_dist2_raw_points_detection {
@@ -361,11 +540,12 @@ impl PatchSegmenter {
                         // Add an extra element
                         connected_components.resize(connected_components_index + 1, vec![]);
                         let mut connected_component = &mut connected_components[connected_components_index];
-                        // Maybe copy the iterator instead of reference it
                         fifo.push(index);
                         connected_component.push(index);
+                        println!("Connected Component: {}", index);
                         while !fifo.is_empty() {
                             let current = fifo.pop().unwrap();
+                            println!("Lenght: {}", adj[current].len());
                             for neighbour in &adj[current] {
                                 let neighbour = *neighbour;
                                 // If the neighbour is also within the same partition
@@ -387,7 +567,7 @@ impl PatchSegmenter {
                         if connected_component.len() < min_point_count_per_cc {
                             connected_components.resize(connected_components_index, vec![]);
                         } else {
-                            unimplemented!("print debug line here maybe?")
+                            println!("\t\t CC {} -> {}", connected_components_index, connected_components.len());
                         }
                     }
                 }
@@ -403,10 +583,7 @@ impl PatchSegmenter {
                 unimplemented!("patch expansion enabled")
             }
 
-            // ZICO: C++ version pass Patches from the frame context
-            // Might have to do that here too but for now lets create then return
-            let mut patches: Vec<Patch> = Vec::with_capacity(256);
-
+            debug!("Num of connected components: {}", connected_components.len());
             // Now we finally start creating the patch
             // Maybe make this its own function?
             for connected_component in connected_components.iter() {
@@ -431,6 +608,7 @@ impl PatchSegmenter {
                 patch.set_view_id(cluster_index as u8);
                 patch.set_best_match_idx(INVALID_PATCH_INDEX);
 
+
                 // Initialize GPAData
                 patch.cur_gpa_patch_data.initialize();
                 patch.pre_gpa_patch_data.initialize();
@@ -445,6 +623,7 @@ impl PatchSegmenter {
                     unimplemented!("patch expansion")
                 }
 
+                debug!("Create Bounding Box");
                 let mut bounding_box = BoundingBox::default();
 
                 // ZICO: Maybe make this default
@@ -462,9 +641,11 @@ impl PatchSegmenter {
                     let point = &points.positions[index];
                     // ZICO: this can be made a method of bounding box
                     for k in 0..=2 {
+                        debug!("{:?}", point[k]);
                         if (point[k] as f64) < bounding_box.min[k] { bounding_box.min[k] = (point[k] as f64).floor() }
                         if (point[k] as f64) > bounding_box.max[k] { bounding_box.max[k] = (point[k] as f64).ceil() }
                     }
+                    debug!("{:?}", bounding_box);
                 }
 
                 if enable_point_cloud_partitioning {
@@ -508,6 +689,7 @@ impl PatchSegmenter {
                         let mut minD0 = patch.d1;
                         let mut maxD0 = patch.d1;
                         patch.depth.0[p] = d;
+                        debug!("p: {}, d: {}", p, d);
                         patch.depth_0pc_idx[p] = i as i64;
                         patch._size_2d_in_pixel.0 = patch._size_2d_in_pixel.0.max(u);
                         patch._size_2d_in_pixel.1 = patch._size_2d_in_pixel.1.max(v);
@@ -539,15 +721,16 @@ impl PatchSegmenter {
 
                 // filter depth
                 let mut peakPerBlock: Vec<i16> = Vec::new();
+                println!("projection mode: {}", patch.projection_mode);
                 let peak_number = if patch.projection_mode == 0 { INFINITE_DEPTH } else { 0 };
                 peakPerBlock.resize(patch.size_uv0.0 * patch.size_uv0.1, peak_number);
 
                 // C++ version iterate through i64 but the patch.size and others use size_t
+                debug!("Do peak finding");
                 for v in 0..patch.size_v {
                     for u in 0..patch.size_u {
                         let p = v * patch.size_u + u;
                         let depth0 = patch.depth.0[p];
-
                         if depth0 == INFINITE_DEPTH {
                             continue;
                         }
@@ -558,17 +741,21 @@ impl PatchSegmenter {
 
                         if patch.projection_mode == 0 {
                             peakPerBlock[p0] = peakPerBlock[p0].min(depth0);
+                            debug!("peak: {}", peakPerBlock[p0]);
                         } else {
                             peakPerBlock[p0] = peakPerBlock[p0].max(depth0);
                         }
                     }
                 }
 
+                debug!("Do Depth refinement");
+                debug!("u: {}, v: {}", patch.size_u, patch.size_v);
                 for v in 0..patch.size_v  {
                     for u in 0..patch.size_u {
                         let p = v * patch.size_u + u;
                         let depth0 = patch.depth.0[p];
 
+                        debug!("p: {}, d: {}", p, depth0);
                         if depth0 == INFINITE_DEPTH {
                             continue;
                         }
@@ -648,8 +835,9 @@ impl PatchSegmenter {
                 // ZICO: C++ version resize to 0, dunno whats the advantage
                 let mut point_count: Vec<usize> = Vec::new();
                 point_count.resize(3, 0);
+                // ZICO: What is this for?
                 Self::resample_point_cloud(
-                    &mut point_count, resampled, resampled_patch_partition, patch,
+                    &mut point_count, &mut resampled, &mut resampled_patch_partition, patch,
                     patch_index, params.map_count_minus_1 > 0, surface_thickness,
                     eom_fix_bit_count, is_additional_projection_plane, use_enhanced_occupancy_map_code,
                     geometry_bit_depth_3d, create_sub_point_cloud, &mut rec
@@ -689,11 +877,12 @@ impl PatchSegmenter {
                 );
             }
             let mut kd_tree_resampled = PCCKdTree::new();
-            kd_tree_resampled.build_from_point_set(resampled);
+            kd_tree_resampled.build_from_point_set(&resampled);
             raw_points.clear();
             // ZICO: I think this one check the distance diff between resampled and original
             // Should double check if nanoflann use square distance
             for i in 0..point_count {
+                println!("{}", i);
                 let result = kd_tree_resampled.search(&points.positions[i], 1);
                 let dist2 = result.squared_dists[0];
                 raw_points_distance[i] = dist2;
@@ -711,6 +900,7 @@ impl PatchSegmenter {
         }
         // ZICO: C++ version did a lossy conversion from f64 to f32
         *distance_source_rec = (mean_yab + mean_uab + mean_vab + mean_yba + mean_uba + mean_vba) as f32;
+        patches
     }
 
     pub fn resample_point_cloud(
@@ -728,6 +918,7 @@ impl PatchSegmenter {
         create_sub_point_cloud: bool,
         rec: &mut PointSet3,
     ) {
+        println!("Resampling Point Cloud");
         let normal_axis = patch.axes.0 as usize;
         let tangent_axis = patch.axes.1 as usize;
         let bitangent_axis = patch.axes.2 as usize;
@@ -740,9 +931,12 @@ impl PatchSegmenter {
         // ZICO: Dunno this significance
         let projection_type_indication = -2 * (patch.projection_mode as i16) + 1;
 
+        debug!("v: {}, u: {}", patch.size_v, patch.size_u);
         for v in 0..patch.size_v {
             for u in 0..patch.size_u {
                 let p = v * patch.size_u + u;
+                debug!("Patch Depth: {}", patch.depth.0[p]);
+                debug!("INFINITE_DEPTH: {}", INFINITE_DEPTH);
                 if patch.depth.0[p] < INFINITE_DEPTH {
                     let depth0 = patch.depth.0[p] as i16;
 
@@ -774,6 +968,7 @@ impl PatchSegmenter {
                         //     rec.add_point_from_vector_3d(point_tmp);
                         // }
                     } else {
+                        debug!("Added");
                         resampled.add_point_from_vector_3d(point);
                         resampled_patch_partition.push(patch_index);
                         if create_sub_point_cloud {
