@@ -30,14 +30,13 @@ pub struct PointSet3 {
 
 impl From<Vec<vivotk::formats::pointxyzrgba::PointXyzRgba>> for PointSet3 {
     fn from(value: Vec<vivotk::formats::pointxyzrgba::PointXyzRgba>) -> Self {
-        // ZICO: Alpha is unused for now
         let (positions, colors): (Vec<Point3D>, Vec<Color3B>) = value
             .into_iter()
             .map(|point| (
                 Point3D {x : point.x as u16, y: point.y as u16, z: point.z as u16},
                 Color3B {x: point.r, y: point.g, z: point.b})
             ).unzip();
-        PointSet3 { positions, colors, colors16bit: vec![], point_patch_indexes: vec![], normals: vec![], with_normals: false, with_colors: false }
+        PointSet3 { positions, colors, colors16bit: vec![], point_patch_indexes: vec![], normals: vec![], with_normals: false, with_colors: true }
     }
 }
 
@@ -58,7 +57,7 @@ impl From<Vec<vivotk::formats::pointxyzrgbanormal::PointXyzRgbaNormal>> for Poin
 
 impl PointSet3 {
     #[inline]
-    pub(crate) fn point_count(&self) -> usize {
+    pub fn point_count(&self) -> usize {
         self.positions.len()
     }
 
@@ -144,6 +143,12 @@ impl PointSet3 {
                 z: color16bit.z as u8,
             };
         }
+    }
+
+    pub fn add_normals(&mut self, normal: Vec<Normal3D>) {
+        assert_eq!(self.point_count(), normal.len());
+        self.with_normals = true;
+        self.normals = normal;
     }
 
     pub fn len(&self) -> usize {

@@ -25,7 +25,7 @@ enum PCCCodecId {
 // ZICO: Maybe break down to multiple smaller structs
 // ZICO: Will comment out unused params later
 #[derive(Debug, Clone)]
-pub struct Params {
+pub struct EncoderParams {
     pub start_frame_number: usize,
     pub configuration_folder: String,
     pub uncompressed_data_folder: String,

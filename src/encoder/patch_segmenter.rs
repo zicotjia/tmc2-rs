@@ -230,9 +230,8 @@ impl PatchSegmenter {
         axis_weight: &Vector3D
     ) -> Vec<usize> {
         let mut partition = Vec::new();
-        // ZICO(QUESTION): What is axis_weight used for?
         let point_count = geometry.point_count();
-        partition.resize(point_count, 0);
+        partition.reserve(point_count);
         let mut weight_value: [f64; 18] = [1.0; 18];
         weight_value[0] = axis_weight[0];
         weight_value[1] = axis_weight[1];
@@ -277,7 +276,16 @@ impl PatchSegmenter {
                         cluster_index = j;
                     }
                 }
+                // debug!("push {} with normal {:?} ans score {} to cluster {}", i, normal, best_score, cluster_index);
                 partition.push(cluster_index);
+            }
+            let mut m: HashMap<i32, usize> = HashMap::new();
+            for i in &partition {
+                *m.entry(*i as i32).or_default() += 1;
+            }
+            debug!("Here");
+            for i in m.into_iter() {
+                debug!("Freq of {} is {}", i.0, i.1);
             }
         }
 
@@ -477,6 +485,7 @@ impl PatchSegmenter {
             if enable_point_cloud_partitioning {
                 unimplemented!("Point Cloud Partitioning");
             } else {
+                debug!("Compute Adjacency Info");
                 adj = Self::compute_adjacency_info(
                     &points,
                     &kd_tree,
@@ -487,8 +496,9 @@ impl PatchSegmenter {
         // Extract Patches
         let mut raw_points_distance: Vec<f64> = vec![f64::MAX; point_count];
         raw_points = (0..point_count).collect();
-        let raw_points_chunks: Vec<Vec<usize>>;
-        let raw_points_distance_chunks: Vec<Vec<f64>>;
+
+        // let raw_points_chunks: Vec<Vec<usize>>;
+        // let raw_points_distance_chunks: Vec<Vec<f64>>;
         if enable_point_cloud_partitioning {
             unimplemented!("implement point cloud partitioning")
         }
@@ -523,20 +533,26 @@ impl PatchSegmenter {
             let mut connected_components: Vec<Vec<usize>> = Vec::new();
             if !enable_point_cloud_partitioning {
                 let mut fifo: Vec<usize> = Vec::with_capacity(point_count);
-                // ZICO: flags for what? UPDATE: its just check if points have been visited
-                let mut flags: Vec<bool> = vec![true; point_count];
+
+                // ZICO: its just check if points have been visited
+                let mut flags: Vec<bool> = vec![false; point_count];
+                for i in &raw_points { flags[*i] = true }
+
                 // ZICO: Can try changing 256
                 connected_components.reserve(256);
 
                 // ZICO: Must we go through all points for each connected components?
                 println!("num raw points: {}", raw_points.len());
+
                 for index in &raw_points {
                     let index = *index;
+
                     if flags[index] && raw_points_distance[index] > max_allowed_dist2_raw_points_detection {
                         flags[index] = false;
                         let connected_components_index = connected_components.len();
                         // There are 6 partitions for now
                         let cluster_index = partition[index];
+                        println!("Cluster Index: {}", index);
                         // Add an extra element
                         connected_components.resize(connected_components_index + 1, vec![]);
                         let mut connected_component = &mut connected_components[connected_components_index];
@@ -545,7 +561,6 @@ impl PatchSegmenter {
                         println!("Connected Component: {}", index);
                         while !fifo.is_empty() {
                             let current = fifo.pop().unwrap();
-                            println!("Lenght: {}", adj[current].len());
                             for neighbour in &adj[current] {
                                 let neighbour = *neighbour;
                                 // If the neighbour is also within the same partition
@@ -557,6 +572,7 @@ impl PatchSegmenter {
                                 if partition[neighbour] == cluster_index && flags[neighbour] && neighbour != current {
                                     flags[neighbour] = false;
                                     fifo.push(neighbour);
+                                    println!("Push: {}", neighbour);
                                     connected_component.push(neighbour);
                                 }
                             }
@@ -748,39 +764,43 @@ impl PatchSegmenter {
                     }
                 }
 
-                debug!("Do Depth refinement");
-                debug!("u: {}, v: {}", patch.size_u, patch.size_v);
-                for v in 0..patch.size_v  {
-                    for u in 0..patch.size_u {
-                        let p = v * patch.size_u + u;
-                        let depth0 = patch.depth.0[p];
-
-                        debug!("p: {}, d: {}", p, depth0);
-                        if depth0 == INFINITE_DEPTH {
-                            continue;
-                        }
-
-                        let u0 = u / patch.occupancy_resolution;
-                        let v0 = v / patch.occupancy_resolution;
-                        let p0 = v0 * patch.size_uv0.0 + u0;
-
-                        let tmp_a = (depth0 - peakPerBlock[p0]).abs();
-                        let tmp_b = surface_thickness as i16 + projection_direction_type * depth0;
-                        let tmp_c = projection_direction_type * patch.d1 as i16 + max_allowed_depth as i16;
-
-                        if depth0 != INFINITE_DEPTH {
-                            if tmp_a > 32 || tmp_b > tmp_c {
-                                patch.depth.0[p] = INFINITE_DEPTH;
-                                patch.depth_0pc_idx[p] = INFINITE_NUMBER;
-                            }
-                        }
-                    }
-                }
+                // ZICO: This code is problematic
+                // debug!("Do Depth refinement");
+                // debug!("u: {}, v: {}", patch.size_u, patch.size_v);
+                // for v in 0..patch.size_v  {
+                //     for u in 0..patch.size_u {
+                //         let p = v * patch.size_u + u;
+                //         let depth0 = patch.depth.0[p];
+                //
+                //         debug!("p: {}, d: {}", p, depth0);
+                //         if depth0 == INFINITE_DEPTH {
+                //             continue;
+                //         }
+                //
+                //         let u0 = u / patch.occupancy_resolution;
+                //         let v0 = v / patch.occupancy_resolution;
+                //         let p0 = v0 * patch.size_uv0.0 + u0;
+                //
+                //         let tmp_a = (depth0 - peakPerBlock[p0]).abs();
+                //         let tmp_b = surface_thickness as i16 + projection_direction_type * depth0;
+                //         let tmp_c = projection_direction_type * patch.d1 as i16 + max_allowed_depth as i16;
+                //
+                //         if depth0 != INFINITE_DEPTH {
+                //             if tmp_a > 32 || tmp_b > tmp_c {
+                //                 patch.depth.0[p] = INFINITE_DEPTH;
+                //                 patch.depth_0pc_idx[p] = INFINITE_NUMBER;
+                //             }
+                //         }
+                //         debug!("p: {}, d: {}", p, patch.depth.0[p]);
+                //     }
+                // }
 
                 if eom_single_layer_mode {
                     unimplemented!("eom single layer mode");
                 } else {
+                    debug!("Patch depth size: {}", patch.depth.0.len());
                     patch.depth.1 = patch.depth.0.clone();
+                    debug!("Patch depth size: {}", patch.depth.1.len());
                     let patch_surface_thickness = surface_thickness;
                     if use_surface_separation {
                         unimplemented!("Use surface separation")
@@ -883,6 +903,7 @@ impl PatchSegmenter {
             // Should double check if nanoflann use square distance
             for i in 0..point_count {
                 println!("{}", i);
+                println!("num of points {}", &points.len());
                 let result = kd_tree_resampled.search(&points.positions[i], 1);
                 let dist2 = result.squared_dists[0];
                 raw_points_distance[i] = dist2;
@@ -1109,7 +1130,7 @@ impl PatchSegmenter {
                 .for_each(|(index, adj_list)| {
                     let point = &point_cloud.positions[index];
                     let result = kd_tree.search(point, max_NN_count);
-                    *adj_list = result.indices_;
+                    *adj_list = result.indices;
                 });
         }
 
@@ -1117,7 +1138,7 @@ impl PatchSegmenter {
         #[cfg(not(feature = "use_rayon"))]
         for (index, point) in point_cloud.positions.iter().enumerate() {
             let result = kd_tree.search(point, max_NN_count);
-            adj_matrix[index] = result.indices_;
+            adj_matrix[index] = result.indices;
         }
 
         adj_matrix

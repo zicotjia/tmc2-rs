@@ -12,24 +12,30 @@ pub struct NNQuery3 {
 
 #[derive(Debug, Clone, Default)]
 pub struct NNResult {
-    pub indices_: Vec<usize>,
+    pub indices: Vec<usize>,
     pub squared_dists: Vec<f64>
 }
 
 impl NNResult {
+    pub(crate) fn len(&self) -> usize {
+        self.indices.len()
+    }
+}
+
+impl NNResult {
     pub fn reserve(&mut self, size: usize) {
-        self.indices_.reserve(size);
+        self.indices.reserve(size);
         self.squared_dists.reserve(size);
     }
     pub fn size(&self) -> usize {
-        self.indices_.len()
+        self.indices.len()
     }
     pub fn push(&mut self, index: usize, dist: f64) {
-        self.indices_.push(index);
+        self.indices.push(index);
         self.squared_dists.push(dist)
     }
     pub fn pop(&mut self) {
-        self.indices_.pop();
+        self.indices.pop();
         self.squared_dists.pop();
     }
 }
@@ -41,7 +47,7 @@ impl From<Vec<(f64, &usize)>> for NNResult {
             .map(|element| (element.0, element.1)
             ).unzip();
         NNResult {
-            indices_: indices,
+            indices: indices,
             squared_dists: dist
         }
     }
@@ -109,8 +115,20 @@ mod tests {
         kdtree.add(&b, 1);
         kdtree.add(&c, 2);
         kdtree.add(&d, 3);
+
+        use rayon::prelude::*;
+
+        let mut temp = vec![];
+        temp.push(a);
+        temp.push(b);
+        temp.push(c);
+        temp.push(d);
+        temp.par_iter().for_each(|point| {
+            println!("Hello");
+           _ = kdtree.search(&a, 2);
+        });
         let nearestTwo = kdtree.search(&a, 2);
-        assert_eq!(nearestTwo.indices_, [0, 1]);
+        assert_eq!(nearestTwo.indices, [0, 1]);
         assert_eq!(nearestTwo.squared_dists, [0.0, 3.0]);
         println!("{:?}", kdtree.search(&a, 4));
     }

@@ -1,22 +1,26 @@
-use std::cmp::Ordering;
-use cgmath::Vector3;
+use std::cmp::{Ordering, PartialEq};
+use cgmath::{InnerSpace, Vector3};
 use crate::encoder::Vector3D;
 use std::collections::BinaryHeap;
-use nalgebra::Matrix3;
+use cgmath::Matrix3;
+use num_traits::Zero;
+use crate::common::math::diagonalize;
 use crate::common::point_set3d::PointSet3;
-use crate::encoder::kd_tree::{NNQuery3, NNResult};
+use crate::encoder::kd_tree::{PCCKdTree};
+use crate::encoder::normals_generator::NormalsGeneratorOrientation::PCC_NORMALS_GENERATOR_ORIENTATION_VIEW_POINT;
 
 type Matrix3D = Matrix3<f64>;
 
-// ZICO: Dunno how this is used yet
-enum NormalsGeneratorOrientation {
+
+#[derive(PartialEq, Eq)]
+pub enum NormalsGeneratorOrientation {
     PCC_NORMALS_GENERATOR_ORIENTATION_NONE,
     PCC_NORMALS_GENERATOR_ORIENTATION_SPANNING_TREE,
     PCC_NORMALS_GENERATOR_ORIENTATION_VIEW_POINT,
     PCC_NORMALS_GENERATOR_ORIENTATION_CUBEMAP_PROJECTION
 }
 
-struct NormalsGenerator3Parameters {
+pub struct NormalsGenerator3Parameters {
     pub view_point: Vector3<f64>,
     pub radius_normal_smoothing: f64,
     pub radius_normal_estimation: f64,
@@ -65,123 +69,305 @@ pub struct NormalsGenerator3 {
     pub normals: Vec<Vector3<f64>>,
     pub eigenvalues: Vec<Vector3D>,
     pub barycenters: Vec<Vector3D>,
-    pub number_of_nearest_neighbors_in_normal_estimation: Vec<u32>,
+    pub number_of_nearest_neighbors: Vec<u32>,
     pub visited: Vec<u32>,
     pub edges: BinaryHeap<WeightedEdge>,
-    pub nb_thread: usize,
+    // ZICO: We don't need this for now, let Rayon decide
+    // pub nb_thread: usize,
 }
 
-// impl NormalsGenerator3 {
-//     pub fn new() -> Self {
-//         Self {
-//             normals: Vec::new(),
-//             eigenvalues: Vec::new(),
-//             barycenters: Vec::new(),
-//             number_of_nearest_neighbors_in_normal_estimation: Vec::new(),
-//             visited: Vec::new(),
-//             edges: BinaryHeap::new(),
-//             nb_thread: 0,
-//         }
-//     }
-//
-//     pub fn clear(&mut self) {
-//         self.normals.clear();
-//     }
-//
-//     pub fn init(&mut self, point_count: usize, params: &NormalsGenerator3Parameters) {
-//         // Initialize the struct
-//     }
-//
-//     pub fn compute(
-//         &mut self,
-//         point_cloud: &PointSet3,
-//         kdtree: &kdtree,
-//         params: &NormalsGenerator3Parameters,
-//         nb_thread: usize,
-//     ) {
-//         // Compute logic
-//     }
-//
-//     pub fn get_normals(&self) -> &Vec<Vector3D> {
-//         &self.normals
-//     }
-//
-//     pub fn get_normal(&self, pos: usize) -> Vector3D {
-//         assert!(pos < self.normals.len());
-//         self.normals[pos].clone()
-//     }
-//
-//     pub fn get_eigenvalues(&self, pos: usize) -> Vector3D {
-//         assert!(pos < self.eigenvalues.len());
-//         self.eigenvalues[pos].clone()
-//     }
-//
-//     pub fn get_centroid(&self, pos: usize) -> Vector3D {
-//         assert!(pos < self.barycenters.len());
-//         self.barycenters[pos].clone()
-//     }
-//
-//     pub fn get_number_of_nearest_neighbors_in_normal_estimation(&self, index: usize) -> u32 {
-//         assert!(index < self.number_of_nearest_neighbors_in_normal_estimation.len());
-//         self.number_of_nearest_neighbors_in_normal_estimation[index]
-//     }
-//
-//     pub fn get_normal_count(&self) -> usize {
-//         self.normals.len()
-//     }
-//
-//     // ZICO: Implement the rest later
-//     // fn compute_normal(
-//     //     index: usize,
-//     //     point_cloud: &PointSet3,
-//     //     kdtree: &kdtree,
-//     //     params: &NormalsGenerator3Parameters,
-//     //     nn_result: &mut NNResult,
-//     // ) {
-//     //     let bary = Vector3D::new(point_cloud[index][0], point_cloud[index][1], point_cloud[index][2]);
-//     //     let normal = Vector3D::new(0.0, 0.0, 0.0);
-//     //     let eigen_value = Vector3D::new(0.0, 0.0, 0.0);
-//     //     let cov_matrix: Matrix3D;
-//     //     // ?
-//     //     let Q: Matrix3D;
-//     //     let D: Matrix3D;
-//     //     kdtree.search
-//     //
-//     // }
-//
-//     fn compute_normals(
-//         point_cloud: &PointSet3,
-//         kdtree: &kdtree,
-//         params: &NormalsGenerator3Parameters,
-//     ) {
-//         // Function implementation goes here
-//     }
-//
-//     fn orient_normals(
-//         point_cloud: &PointSet3,
-//         kdtree: &kdtree,
-//         params: &NormalsGenerator3Parameters,
-//     ) {
-//         // Function implementation goes here
-//     }
-//
-//     fn add_neighbors(
-//         current: u32,
-//         point_cloud: &PointSet3,
-//         kdtree: &kdtree,
-//         nn_query: &mut NNQuery3,
-//         nn_result: &mut NNResult,
-//         accumulated_normals: &mut Vector3D,
-//         number_of_normals: &mut usize,
-//     ) {
-//         // Function implementation goes here
-//     }
-//
-//     fn smooth_normals(
-//         point_cloud: &PointSet3,
-//         kdtree: &kdtree,
-//         params: &NormalsGenerator3Parameters,
-//     ) {
-//         // Function implementation goes here
-//     }
-// }
+impl NormalsGenerator3 {
+    pub fn init(point_count: usize, params: &NormalsGenerator3Parameters) -> NormalsGenerator3 {
+        NormalsGenerator3 {
+            normals: vec![Vector3::new(0.0, 0.0, 0.0); point_count],
+            eigenvalues:
+            if params.store_eigenvalues { vec![Vector3::new(0.0, 0.0, 0.0); point_count] } else { vec![] },
+            barycenters:
+            if params.store_centroids { vec![Vector3::new(0.0, 0.0, 0.0); point_count] } else { vec![] },
+            number_of_nearest_neighbors:
+            if params.store_number_of_nearest_neighbors_in_normal_estimation { vec![0; point_count] } else { vec![] },
+            visited: vec![],
+            edges: Default::default()
+        }
+    }
+
+    pub fn compute(
+        &mut self,
+        points: &PointSet3,
+        kd_tree: &PCCKdTree,
+        params: &NormalsGenerator3Parameters) {
+        Self::init(points.point_count(), params);
+        self.compute_normals(points, kd_tree, params);
+        self.orient_normals(points, params);
+    }
+
+    // ZICO: C++ Implementation pass around a NNResult, but from what I see,
+    // this function assign the normal value from the search result,
+    // I think its better for the NNResult to be restricted here
+    pub fn compute_normal(
+        &mut self,
+        index: usize,
+        point_cloud: &PointSet3,
+        kd_tree: &PCCKdTree,
+        params: &NormalsGenerator3Parameters
+    )  {
+        // ZICO: For convenience’s sake, make a copy of the current position but in f64
+        let position_vector3d: Vector3D = Vector3D::new(
+            point_cloud.positions[index][0] as f64,
+            point_cloud.positions[index][1] as f64,
+            point_cloud.positions[index][2] as f64
+        );
+        let mut bary: Vector3D = position_vector3d;
+        let mut normal = Vector3::zero();
+        let mut eigenval = Vector3::zero();
+        let mut cov_mat = Matrix3::zero();
+
+        let n_neighbors = kd_tree.search(&point_cloud.positions[index], 10);
+
+        if n_neighbors.len() > 1 {
+            // Compute barycenter
+            bary = Vector3::zero();
+            for &neighbor_idx in n_neighbors.indices.iter() {
+                bary.x += point_cloud.positions[neighbor_idx][0] as f64;
+                bary.y += point_cloud.positions[neighbor_idx][1] as f64;
+                bary.z += point_cloud.positions[neighbor_idx][2] as f64;
+            }
+            bary /= n_neighbors.len() as f64;
+
+            // Compute covariance matrix
+            cov_mat = Matrix3::zero();
+            for &neighbor_idx in n_neighbors.indices.iter() {
+                let mut pt: Vector3<f64> = Vector3::zero();
+                pt.x = point_cloud.positions[neighbor_idx][0] as f64 - bary.x;
+                pt.y = point_cloud.positions[neighbor_idx][1] as f64 - bary.y;
+                pt.z = point_cloud.positions[neighbor_idx][2] as f64 - bary.z;
+                cov_mat.x.x += pt.x * pt.x;
+                cov_mat.y.y += pt.y * pt.y;
+                cov_mat.z.z += pt.z * pt.z;
+                cov_mat.x.y += pt.x * pt.y;
+                cov_mat.x.z += pt.x * pt.z;
+                cov_mat.y.z += pt.y * pt.z;
+            }
+            cov_mat.y.x = cov_mat.x.y;
+            cov_mat.z.x = cov_mat.x.z;
+            cov_mat.z.y = cov_mat.y.z;
+            cov_mat /= (n_neighbors.len() - 1) as f64;
+
+            // Diagonalize covariance matrix (equivalent to PCCDiagonalize)
+            let (mut q, mut d) = diagonalize(&cov_mat);
+
+            d.x.x = d.x.x.abs();
+            d.y.y = d.y.y.abs();
+            d.z.z = d.z.z.abs();
+
+            // Extract normal and eigenvalues
+            if d.x.x < d.y.y && d.x.x < d.z.z {
+                normal = q.x;
+                eigenval.x = d.x.x;
+                if d.y.y < d.z.z {
+                    eigenval.y = d.y.y;
+                    eigenval.z = d.z.z;
+                } else {
+                    eigenval.y = d.z.z;
+                    eigenval.z = d.y.y;
+                }
+            } else if d.y.y < d.z.z {
+                normal = q.y;
+                eigenval.x = d.y.y;
+                if d.x.x < d.z.z {
+                    eigenval.y = d.x.x;
+                    eigenval.z = d.z.z;
+                } else {
+                    eigenval.y = d.z.z;
+                    eigenval.z = d.x.x;
+                }
+            } else {
+                normal = q.z;
+                eigenval.x = d.z.z;
+                if d.x.x < d.y.y {
+                    eigenval.y = d.x.x;
+                    eigenval.z = d.y.y;
+                } else {
+                    eigenval.y = d.y.y;
+                    eigenval.z = d.x.x;
+                }
+            }
+        }
+
+        // Flip normal based on viewpoint
+        if normal.dot(params.view_point - position_vector3d) < 0.0 {
+            self.normals[index] = -normal;
+        } else {
+            self.normals[index] = normal;
+        }
+
+        // Store eigenvalues, barycenters, and number of neighbors if needed
+        if params.store_eigenvalues {
+            self.eigenvalues[index] = eigenval;
+        }
+        if params.store_centroids {
+            self.barycenters[index] = bary;
+        }
+        if params.store_number_of_nearest_neighbors_in_normal_estimation {
+            self.number_of_nearest_neighbors[index] = n_neighbors.len() as u32;
+        }
+    }
+
+    pub fn compute_normals(
+        &mut self,
+        point_cloud: &PointSet3,
+        kd_tree: &PCCKdTree,
+        params: &NormalsGenerator3Parameters
+    ) {
+        let point_count = point_cloud.point_count();
+        self.normals.resize(point_count, Vector3::zero());
+        let chunk_count = 64;
+        let sub_ranges = Self::divide_range(0, point_count, chunk_count);
+
+        // ZICO: Need major refactoring due to Rust.
+        // Refactor compute_normal to return normal vector instead of modifying in place
+        // Then assign the normal vector to self
+        // #[cfg(feature = "use_rayon")]
+        // {
+        //     let self_arc = Arc::new(Mutex::new(self));
+        //
+        //     let new_normals: Vec<Vector3<f64>>;
+        //
+        //     use rayon::prelude::*;
+        //     sub_ranges[..sub_ranges.len() - 1] // Exclude the last element since we're accessing pairs
+        //         .par_iter()
+        //         .enumerate()
+        //         .for_each(|(i, &start)| {
+        //             let end = sub_ranges[i + 1];
+        //             for j in start..end {
+        //                 self.compute_normal(j, point_cloud, kd_tree, params);
+        //             }
+        //         });
+        //     // sub_ranges.par_iter()
+        //     //     .zip(sub_ranges.par_iter().skip(1))
+        //     //     .for_each(|(start, end)| {
+        //     //         for pt_index in *start..*end { self.compute_normal(pt_index, point_cloud, kd_tree, params) }
+        //     //     })
+        //
+        //     // let temp_sub_ranges = sub_ranges.iter()
+        //     //     .zip(sub_ranges.iter().skip(1))
+        //     //     .collect::<Vec<(usize, usize)>>();
+        //     //
+        //     // temp_sub_ranges.par_iter().for_each(|&range| {
+        //     //     for i in range.0..range.1 {
+        //     //         self.compute_normal(i, point_cloud, kd_tree, params);
+        //     //     }
+        //     // });
+        // }
+
+        // Sequential version, don't need to work chunk
+        for i in 0..point_count { self.compute_normal(i, point_cloud, kd_tree, params ) }
+    }
+
+
+    // Given two index. Partition into a specified number of chunk
+    fn divide_range(start: usize, end: usize, chunk_count: usize) -> Vec<usize> {
+        let element_count = end - start;
+        let mut sub_ranges: Vec<usize> = Vec::new();
+        if element_count == chunk_count {
+            sub_ranges.resize(element_count + 1, 0);
+            for i in start..=end { sub_ranges[i - start] = i }
+        } else {
+            sub_ranges.resize(chunk_count + 1, 0);
+            let step = element_count as f64 / (chunk_count + 1) as f64;
+            let mut pos = start as f64;
+            for i in 0..chunk_count {
+                sub_ranges[i] = pos as usize;
+                pos += step;
+            }
+            sub_ranges[chunk_count] = end;
+        }
+        sub_ranges
+    }
+
+    // ZICO: Let's use view point adjustment for now
+    pub fn orient_normals(
+        &mut self,
+        point_cloud: &PointSet3,
+        params: &NormalsGenerator3Parameters
+    ) {
+        if params.orientation_strategy == PCC_NORMALS_GENERATOR_ORIENTATION_VIEW_POINT {
+            let point_count = point_cloud.point_count();
+
+            #[cfg(feature = "use_rayon")]
+            {
+                use rayon::prelude::*;
+
+                self.normals.par_iter_mut().enumerate().for_each(|(index, normal)| {
+                    let view_direction = Vector3::new(
+                        params.view_point.x - point_cloud.positions[index].x as f64,
+                        params.view_point.y - point_cloud.positions[index].y as f64,
+                        params.view_point.z - point_cloud.positions[index].z as f64,
+                    );
+                    if normal.dot(view_direction) < 0.0 {
+                        *normal = -*normal;
+                    }
+                })
+            }
+
+            #[cfg(not(feature = "use_rayon"))]
+            {
+                self.normals.iter_mut().enumerate().for_each(|(index, normal)| {
+                    let view_direction = Vector3::new(
+                        params.view_point.x - point_cloud.positions[index].x as f64,
+                        params.view_point.y - point_cloud.positions[index].y as f64,
+                        params.view_point.z - point_cloud.positions[index].z as f64,
+                    );
+                    if normal.dot(view_direction) < 0.0 {
+                        *normal = -*normal;
+                    }
+                })
+            }
+
+        }
+    }
+}
+
+mod tests {
+    use std::fs;
+    use vivotk::formats::PointCloud;
+    use vivotk::formats::pointxyzrgba::PointXyzRgba;
+    use vivotk::pcd::{read_pcd_file, read_pcd_header};
+    use super::*;
+
+    #[test]
+    fn test_compute_normals() {
+        let file_path = "../pointClouds/longdress/Pcd";
+        let mut paths = fs::read_dir(file_path).unwrap();
+        paths.next();
+        let sample_pcd_file_path = "./test_files/pcd/longdress_vox10_1051.pcd";
+        // let sample_pcd_file_path = paths.next().unwrap().unwrap().path();
+        
+        let header = read_pcd_header(sample_pcd_file_path.clone());
+        let ptcl = read_pcd_file(sample_pcd_file_path.clone());
+
+        let ptcl = PointCloud::<PointXyzRgba>::from(ptcl.unwrap());
+        let point_cloud = PointSet3::from(ptcl.points);
+
+        let mut kd_tree = PCCKdTree::new();
+        kd_tree.build_from_point_set(&point_cloud);
+
+        let param = NormalsGenerator3Parameters {
+            view_point: Vector3 {x: 0.0, y: 0.0, z: 0.0},
+            radius_normal_smoothing: 0.0,
+            radius_normal_estimation: 0.0,
+            radius_normal_orientation: 0.0,
+            weight_normal_smoothing: 0.0,
+            number_of_nearest_neighbors_in_normal_smoothing: 0,
+            number_of_nearest_neighbors_in_normal_estimation: point_cloud.point_count(),
+            number_of_nearest_neighbors_in_normal_orientation: 0,
+            number_of_iterations_in_normal_smoothing: 0,
+            orientation_strategy: NormalsGeneratorOrientation::PCC_NORMALS_GENERATOR_ORIENTATION_VIEW_POINT,
+            store_eigenvalues: false,
+            store_number_of_nearest_neighbors_in_normal_estimation: true,
+            store_centroids: false,
+        };
+        let mut normal_generator = NormalsGenerator3::init(point_cloud.point_count(), &param);
+        normal_generator.compute_normals(&point_cloud, &kd_tree, &param);
+    }
+}

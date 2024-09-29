@@ -1,7 +1,8 @@
 // Some math stuff for encoding purpose
 
+use std::f64::EPSILON;
 use std::fmt::Debug;
-use cgmath::{Vector3};
+use cgmath::{InnerSpace, Matrix, Matrix3, Quaternion, Vector3};
 use cgmath::num_traits::float::FloatCore;
 use serde::{Deserialize, Serialize};
 use vivotk::formats::PointCloud;
@@ -102,10 +103,71 @@ impl Debug for BoundingBox {
     }
 }
 
+// Diagonalize a matrix
+pub(crate) fn diagonalize(a: &Matrix3<f64>) -> (Matrix3<f64>, Matrix3<f64>) {
+    let maxsteps = 24;
+    let mut quat = Quaternion::from_sv(1.0, cgmath::Vector3::new(0.0, 0.0, 0.0)); // Quaternion identity
+
+    let mut q: Matrix3<f64> = Matrix3::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    let mut d: Matrix3<f64> = Matrix3::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+
+    for _ in 0..maxsteps {
+        // Convert quaternion to matrix using cgmath
+        q = Matrix3::from(quat);
+
+        // Multiply AQ = A * Q
+        let aq = a * q;
+
+        // D = Q.transpose() * AQ
+        d = q.transpose() * aq;
+
+        let o = [d[1][2], d[0][2], d[0][1]];
+        let m = [o[0].abs(), o[1].abs(), o[2].abs()];
+
+        // Find the index of the largest element of the off-diagonal
+        let k0 = if m[0] > m[1] && m[0] > m[2] {
+            0
+        } else if m[1] > m[2] {
+            1
+        } else {
+            2
+        };
+
+        let k1 = (k0 + 1) % 3;
+        let k2 = (k0 + 2) % 3;
+
+        if o[k0].abs() < EPSILON {
+            break; // diagonal already
+        }
+
+        let theta = (d[k2][k2] - d[k1][k1]) / (2.0 * o[k0]);
+        let sgn = if theta > 0.0 { 1.0 } else { -1.0 };
+        let theta = theta * sgn;
+        let t = sgn / (theta + if theta < 1.0e6 { (theta * theta + 1.0).sqrt() } else { theta });
+        let c = 1.0 / (t * t + 1.0).sqrt();
+
+        if (c - 1.0).abs() < EPSILON {
+            break;
+        }
+
+        let mut jr_quat = Quaternion::new(0.0, 0.0, 0.0, 0.0);
+        jr_quat.v[k0] = sgn * ((1.0 - c) / 2.0).sqrt();
+        jr_quat.v[k0] *= -1.0; // account for quaternion convention
+        jr_quat.s = (1.0 - jr_quat.v[k0] * jr_quat.v[k0]).sqrt();
+
+        // Update quaternion
+        quat = quat * jr_quat;
+        quat = quat.normalize();
+    }
+    (q, d)
+}
+
+
 #[cfg(test)]
 mod tests {
     use std::cmp;
-    use cgmath::{assert_ulps_eq, relative_eq};
+    use approx::assert_relative_eq;
+    use cgmath::{assert_ulps_eq, relative_eq, SquareMatrix};
     use cgmath::num_traits::float::FloatCore;
     use vivotk::pcd::read_pcd_file;
     use super::*;
@@ -175,5 +237,40 @@ mod tests {
         assert!(relative_eq!(b_box.max.x, max_x, epsilon = f64::EPSILON));
         assert!(relative_eq!(b_box.max.y, max_y, epsilon = f64::EPSILON));
         assert!(relative_eq!(b_box.max.z, max_z, epsilon = f64::EPSILON));
+    }
+
+    #[test]
+    fn test_diagonalize() {
+        // Test matrix (symmetric)
+        let matrix = Matrix3::new(
+            4.0, 1.0, 1.0,
+            1.0, 3.0, 1.0,
+            1.0, 1.0, 2.0
+        );
+
+        let (q, d) = diagonalize(&matrix);
+
+        let reconstructed = q * d * q.invert().unwrap();
+
+        let reconstructed_d = q.invert().unwrap() * matrix * q;
+
+        for i in 0..3 {
+            for j in 0..3 {
+                println!("i: {} j: {} val: {}", i, j, reconstructed_d[i][j]);
+            }
+        }
+
+        for i in 0..3 {
+            for j in 0..3 {
+                println!("i: {} j: {} val: {}", i, j, d[i][j]);
+            }
+        }
+
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!((matrix[i][j] - reconstructed[i][j]).abs() < 0.000001, "Reconstructed matrix element at ({}, {}) is incorrect", i, j);
+                assert!((d[i][j] - reconstructed_d[i][j]).abs() < 0.000001, "diagonal matrix element at ({}, {}) is incorrect", i, j);
+            }
+        }
     }
 }
