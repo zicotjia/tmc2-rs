@@ -8,6 +8,7 @@ use crate::common::math::diagonalize;
 use crate::common::point_set3d::PointSet3;
 use crate::encoder::kd_tree::{PCCKdTree};
 use crate::encoder::normals_generator::NormalsGeneratorOrientation::PCC_NORMALS_GENERATOR_ORIENTATION_VIEW_POINT;
+use rayon::prelude::*;
 
 type Matrix3D = Matrix3<f64>;
 
@@ -66,20 +67,20 @@ impl PartialOrd for WeightedEdge {
 }
 
 pub struct NormalsGenerator3 {
-    pub normals: Vec<Vector3<f64>>,
+    // pub normals: Vec<Vector3<f64>>,
     pub eigenvalues: Vec<Vector3D>,
     pub barycenters: Vec<Vector3D>,
     pub number_of_nearest_neighbors: Vec<u32>,
     pub visited: Vec<u32>,
     pub edges: BinaryHeap<WeightedEdge>,
-    // ZICO: We don't need this for now, let Rayon decide
-    // pub nb_thread: usize,
+    // // ZICO: We don't need this for now, let Rayon decide
+    // // pub nb_thread: usize,
 }
 
 impl NormalsGenerator3 {
     pub fn init(point_count: usize, params: &NormalsGenerator3Parameters) -> NormalsGenerator3 {
         NormalsGenerator3 {
-            normals: vec![Vector3::new(0.0, 0.0, 0.0); point_count],
+            // normals: vec![Vector3::new(0.0, 0.0, 0.0); point_count],
             eigenvalues:
             if params.store_eigenvalues { vec![Vector3::new(0.0, 0.0, 0.0); point_count] } else { vec![] },
             barycenters:
@@ -92,25 +93,24 @@ impl NormalsGenerator3 {
     }
 
     pub fn compute(
-        &mut self,
         points: &PointSet3,
         kd_tree: &PCCKdTree,
-        params: &NormalsGenerator3Parameters) {
-        Self::init(points.point_count(), params);
-        self.compute_normals(points, kd_tree, params);
-        self.orient_normals(points, params);
+        params: &NormalsGenerator3Parameters) -> Vec<Vector3<f64>> {
+        let mut generator = Self::init(points.point_count(), params);
+        let mut normals = generator.compute_normals(points, kd_tree, params);
+        generator.orient_normals(&mut normals, points, params);
+        normals
     }
 
-    // ZICO: C++ Implementation pass around a NNResult, but from what I see,
-    // this function assign the normal value from the search result,
-    // I think its better for the NNResult to be restricted here
+    // ZICO: C++ version update normal in place,
+    // For the sake of parallelization, I make this return a normal instead
     pub fn compute_normal(
-        &mut self,
+        &self,
         index: usize,
         point_cloud: &PointSet3,
         kd_tree: &PCCKdTree,
         params: &NormalsGenerator3Parameters
-    )  {
+    )  -> Vector3<f64> {
         // ZICO: For convenience’s sake, make a copy of the current position but in f64
         let position_vector3d: Vector3D = Vector3D::new(
             point_cloud.positions[index][0] as f64,
@@ -196,72 +196,52 @@ impl NormalsGenerator3 {
 
         // Flip normal based on viewpoint
         if normal.dot(params.view_point - position_vector3d) < 0.0 {
-            self.normals[index] = -normal;
-        } else {
-            self.normals[index] = normal;
+            normal = -normal;
         }
 
         // Store eigenvalues, barycenters, and number of neighbors if needed
-        if params.store_eigenvalues {
-            self.eigenvalues[index] = eigenval;
-        }
-        if params.store_centroids {
-            self.barycenters[index] = bary;
-        }
-        if params.store_number_of_nearest_neighbors_in_normal_estimation {
-            self.number_of_nearest_neighbors[index] = n_neighbors.len() as u32;
-        }
+        // if params.store_eigenvalues {
+        //     self.eigenvalues[index] = eigenval;
+        // }
+        // if params.store_centroids {
+        //     self.barycenters[index] = bary;
+        // }
+        // if params.store_number_of_nearest_neighbors_in_normal_estimation {
+        //     self.number_of_nearest_neighbors[index] = n_neighbors.len() as u32;
+        // }
+        normal
     }
 
     pub fn compute_normals(
-        &mut self,
+        &self,
         point_cloud: &PointSet3,
         kd_tree: &PCCKdTree,
         params: &NormalsGenerator3Parameters
-    ) {
+    ) -> Vec<Vector3<f64>> {
         let point_count = point_cloud.point_count();
-        self.normals.resize(point_count, Vector3::zero());
-        let chunk_count = 64;
-        let sub_ranges = Self::divide_range(0, point_count, chunk_count);
+        let mut normals: Vec<Vector3<f64>> = vec![Vector3::zero(); point_count];
+
+        // ZICO: Let Rayon do chunking
+        // let chunk_count = 64;
+        // let sub_ranges = Self::divide_range(0, point_count, chunk_count);
 
         // ZICO: Need major refactoring due to Rust.
         // Refactor compute_normal to return normal vector instead of modifying in place
         // Then assign the normal vector to self
-        // #[cfg(feature = "use_rayon")]
-        // {
-        //     let self_arc = Arc::new(Mutex::new(self));
-        //
-        //     let new_normals: Vec<Vector3<f64>>;
-        //
-        //     use rayon::prelude::*;
-        //     sub_ranges[..sub_ranges.len() - 1] // Exclude the last element since we're accessing pairs
-        //         .par_iter()
-        //         .enumerate()
-        //         .for_each(|(i, &start)| {
-        //             let end = sub_ranges[i + 1];
-        //             for j in start..end {
-        //                 self.compute_normal(j, point_cloud, kd_tree, params);
-        //             }
-        //         });
-        //     // sub_ranges.par_iter()
-        //     //     .zip(sub_ranges.par_iter().skip(1))
-        //     //     .for_each(|(start, end)| {
-        //     //         for pt_index in *start..*end { self.compute_normal(pt_index, point_cloud, kd_tree, params) }
-        //     //     })
-        //
-        //     // let temp_sub_ranges = sub_ranges.iter()
-        //     //     .zip(sub_ranges.iter().skip(1))
-        //     //     .collect::<Vec<(usize, usize)>>();
-        //     //
-        //     // temp_sub_ranges.par_iter().for_each(|&range| {
-        //     //     for i in range.0..range.1 {
-        //     //         self.compute_normal(i, point_cloud, kd_tree, params);
-        //     //     }
-        //     // });
-        // }
+        #[cfg(feature = "use_rayon")]
+        {
+            normals
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(index, vec)| {
+                    *vec = self.compute_normal(index, point_cloud, kd_tree, params)
+                })
+        }
 
         // Sequential version, don't need to work chunk
-        for i in 0..point_count { self.compute_normal(i, point_cloud, kd_tree, params ) }
+        #[cfg(not(feature = "use_rayon"))]
+        for i in 0..point_count { normals[i] = self.compute_normal(i, point_cloud, kd_tree, params ) }
+        normals
     }
 
 
@@ -287,18 +267,17 @@ impl NormalsGenerator3 {
 
     // ZICO: Let's use view point adjustment for now
     pub fn orient_normals(
-        &mut self,
+        &self,
+        normals: &mut Vec<Vector3<f64>>,
         point_cloud: &PointSet3,
         params: &NormalsGenerator3Parameters
     ) {
         if params.orientation_strategy == PCC_NORMALS_GENERATOR_ORIENTATION_VIEW_POINT {
-            let point_count = point_cloud.point_count();
-
             #[cfg(feature = "use_rayon")]
             {
                 use rayon::prelude::*;
 
-                self.normals.par_iter_mut().enumerate().for_each(|(index, normal)| {
+                normals.par_iter_mut().enumerate().for_each(|(index, normal)| {
                     let view_direction = Vector3::new(
                         params.view_point.x - point_cloud.positions[index].x as f64,
                         params.view_point.y - point_cloud.positions[index].y as f64,
@@ -312,7 +291,7 @@ impl NormalsGenerator3 {
 
             #[cfg(not(feature = "use_rayon"))]
             {
-                self.normals.iter_mut().enumerate().for_each(|(index, normal)| {
+                normals.iter_mut().enumerate().for_each(|(index, normal)| {
                     let view_direction = Vector3::new(
                         params.view_point.x - point_cloud.positions[index].x as f64,
                         params.view_point.y - point_cloud.positions[index].y as f64,

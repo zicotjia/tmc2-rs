@@ -127,11 +127,11 @@ fn test_point_initial_segmentation() {
         store_centroids: false,
     };
     let mut normal_generator = NormalsGenerator3::init(point_cloud.point_count(), &param);
-    normal_generator.compute_normals(&point_cloud, &kd_tree, &param);
+    let normals = normal_generator.compute_normals(&point_cloud, &kd_tree, &param);
     let duration = start.elapsed(); // Stop timing
     println!("Time taken to generate normal: {:?}", duration);
 
-    point_cloud.add_normals(normal_generator.normals);
+    point_cloud.add_normals(normals);
 
     let duration = start.elapsed(); // Stop timing
     println!("Time taken by point_cloud conversion: {:?}", duration);
@@ -247,6 +247,7 @@ fn test_patch_segmenter() {
     let mut paths = fs::read_dir(file_path).unwrap();
     paths.next();
     let sample_pcd_file_path = "./test_files/pcd/longdress_vox10_1051.pcd";
+    // let sample_pcd_file_path = "./test_files/pcd/ascii2.pcd";
     // let sample_pcd_file_path = paths.next().unwrap().unwrap().path();
     println!("First path: {:?}", sample_pcd_file_path);
 
@@ -285,9 +286,9 @@ fn test_patch_segmenter() {
         store_centroids: false,
     };
     let mut normal_generator = NormalsGenerator3::init(point_cloud.point_count(), &param);
-    normal_generator.compute_normals(&point_cloud, &kd_tree, &param);
+    let normals = normal_generator.compute_normals(&point_cloud, &kd_tree, &param);
 
-    point_cloud.add_normals(normal_generator.normals);
+    point_cloud.add_normals(normals);
     let duration = start.elapsed(); // Stop timing
     println!("Time taken to generate normal: {:?}", duration);
 

@@ -244,6 +244,7 @@ impl PatchSegmenter {
         #[cfg(feature = "use_rayon")]
         {
             use rayon::prelude::*;
+            partition.resize(point_count, 0);
             partition
                 .par_iter_mut()
                 .enumerate()
@@ -262,6 +263,13 @@ impl PatchSegmenter {
             });
         }
 
+        let mut m: HashMap<i32, usize> = HashMap::new();
+        for i in &partition {
+            *m.entry(*i as i32).or_default() += 1;
+        }
+        for i in m.into_iter() {
+            println!("Freq of {} is {}", i.0, i.1);
+        }
 
         // ZICO: Can be made functional
         #[cfg(not(feature = "use_rayon"))]
@@ -278,14 +286,6 @@ impl PatchSegmenter {
                     }
                 }
                 partition.push(cluster_index);
-            }
-            let mut m: HashMap<i32, usize> = HashMap::new();
-            for i in &partition {
-                *m.entry(*i as i32).or_default() += 1;
-            }
-            debug!("Here");
-            for i in m.into_iter() {
-                debug!("Freq of {} is {}", i.0, i.1);
             }
         }
 
