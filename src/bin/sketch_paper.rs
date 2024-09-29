@@ -15,7 +15,7 @@ use tmc2rs::encoder::Vector3D;
 
 // For quick testing
 fn main() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
+    // env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
     test_patch_segmenter();
     // test_point_initial_segmentation();
 }
@@ -246,7 +246,7 @@ fn test_patch_segmenter() {
     let file_path = "../pointClouds/longdress/Pcd";
     let mut paths = fs::read_dir(file_path).unwrap();
     paths.next();
-    let sample_pcd_file_path = "./test_files/pcd/ascii2.pcd";
+    let sample_pcd_file_path = "./test_files/pcd/longdress_vox10_1051.pcd";
     // let sample_pcd_file_path = paths.next().unwrap().unwrap().path();
     println!("First path: {:?}", sample_pcd_file_path);
 
@@ -289,7 +289,7 @@ fn test_patch_segmenter() {
 
     point_cloud.add_normals(normal_generator.normals);
     let duration = start.elapsed(); // Stop timing
-    println!("Time taken to build generate normal: {:?}", duration);
+    println!("Time taken to generate normal: {:?}", duration);
 
     let start = Instant::now(); // Start timing
     let axis_weights = Vector3D { x: 1.0, y: 1.0, z: 1.0 };

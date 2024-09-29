@@ -76,7 +76,7 @@ impl PointSet3 {
     }
 
     pub(crate) fn add_point_from_vector_3d(&mut self, position: Vector3D) -> usize {
-        self.positions.push(Point3D::new(position.x as u16, position.y as u16, position.x as u16));
+        self.positions.push(Point3D::new(position.x as u16, position.y as u16, position.z as u16));
         if self.with_colors {
             self.colors.push(Color3B::new(127, 127, 127));
             self.colors16bit.push(Color16bit::new(0, 0, 0));
