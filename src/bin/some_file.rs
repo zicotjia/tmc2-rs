@@ -15,7 +15,7 @@ use tmc2rs::encoder::Vector3D;
 
 // For quick testing
 fn main() {
-    // env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
     test_patch_segmenter();
     // test_point_initial_segmentation();
 }
@@ -54,12 +54,12 @@ fn test_patch_segmenter() {
         radius_normal_orientation: 0.0,
         weight_normal_smoothing: 0.0,
         number_of_nearest_neighbors_in_normal_smoothing: 0,
-        number_of_nearest_neighbors_in_normal_estimation: point_cloud.point_count(),
+        number_of_nearest_neighbors_in_normal_estimation: 100,
         number_of_nearest_neighbors_in_normal_orientation: 0,
         number_of_iterations_in_normal_smoothing: 0,
         orientation_strategy: NormalsGeneratorOrientation::PCC_NORMALS_GENERATOR_ORIENTATION_VIEW_POINT,
         store_eigenvalues: false,
-        store_number_of_nearest_neighbors_in_normal_estimation: true,
+        store_number_of_nearest_neighbors_in_normal_estimation: false,
         store_centroids: false,
     };
     let mut normal_generator = NormalsGenerator3::init(point_cloud.point_count(), &param);
@@ -68,14 +68,6 @@ fn test_patch_segmenter() {
     point_cloud.add_normals(normals);
     let duration = start.elapsed(); // Stop timing
     println!("Time taken to generate normal: {:?}", duration);
-
-    let start = Instant::now(); // Start timing
-    let axis_weights = Vector3D { x: 1.0, y: 1.0, z: 1.0 };
-    let partition = PatchSegmenter::initial_segmentation(
-        &point_cloud, &orientations6, orientations6Count, &axis_weights
-    );
-    let duration = start.elapsed(); // Stop timing
-    println!("Time taken by initial segmentation: {:?}", duration);
 
 
     let patch_segmenter_params = PatchSegmenterParams::default();

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tmc2rs::writer::{Format, PlyWriter};
 use tmc2rs::{Decoder, Params};
 
-mod sketch_paper;
+mod some_file;
 
 /// An MPEG-VPCC-TMC2 conformant decoder
 #[derive(Parser)]

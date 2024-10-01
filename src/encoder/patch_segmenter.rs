@@ -289,8 +289,6 @@ impl PatchSegmenter {
                 partition.push(cluster_index);
             }
         }
-
-        debug!("partition {:?}", partition);
         partition
     }
 
@@ -394,8 +392,6 @@ impl PatchSegmenter {
                 vector.clear();
             }
         }
-
-        debug!("partition {:?}", partition);
     }
 
     pub fn segment_patches(
@@ -487,12 +483,14 @@ impl PatchSegmenter {
             if enable_point_cloud_partitioning {
                 unimplemented!("Point Cloud Partitioning");
             } else {
-                debug!("Compute Adjacency Info");
+                let adj_start = Instant::now();
                 adj = Self::compute_adjacency_info(
                     &points,
                     &kd_tree,
                     max_nn_count
                 );
+                let adj_duration = adj_start.elapsed();
+                debug!("Time taken to compute adj info: {:?}", adj_duration)
             }
         }
         // Extract Patches
@@ -535,7 +533,7 @@ impl PatchSegmenter {
 
             /// Generate Connected Components
             ///
-            let start = Instant::now(); // Start timing
+            let cc_start = Instant::now(); // Start timing
             let mut connected_components: Vec<Vec<usize>> = Vec::new();
             if !enable_point_cloud_partitioning {
                 let mut fifo: Vec<usize> = Vec::with_capacity(point_count);
@@ -581,8 +579,8 @@ impl PatchSegmenter {
             } else {
                 unimplemented!("cloud partitioning")
             }
-            let duration = start.elapsed();
-            debug!("Time taken to create connected components: {:?}", duration);
+            let cc_duration = cc_start.elapsed();
+            // debug!("Time taken to create connected components: {:?}", cc_duration);
             if connected_components.is_empty() {break;}
             if high_gradient_separation {
                 unimplemented!("separate high gradient points")
@@ -591,9 +589,9 @@ impl PatchSegmenter {
                 unimplemented!("patch expansion enabled")
             }
 
-            /// Patch generation
+            /// Patches generation
+            let patch_start = Instant::now();
             for connected_component in connected_components.iter() {
-                let start = Instant::now();
                 let patch_index = patches.len();
 
                 patches.resize(patch_index + 1, Patch::default());
@@ -688,7 +686,6 @@ impl PatchSegmenter {
                         let mut minD0 = patch.d1;
                         let mut maxD0 = patch.d1;
                         patch.depth.0[p] = d;
-                        debug!("p: {}, d: {}", p, d);
                         patch.depth_0pc_idx[p] = i as i64;
                         patch._size_2d_in_pixel.0 = patch._size_2d_in_pixel.0.max(u);
                         patch._size_2d_in_pixel.1 = patch._size_2d_in_pixel.1.max(v);
@@ -719,39 +716,38 @@ impl PatchSegmenter {
                 patch.occupancy.resize(patch.size_uv0.0 * patch.size_uv0.1, false);
 
                 /// filter depth
-                let mut peakPerBlock: Vec<i16> = Vec::new();
-                let peak_number = if patch.projection_mode == 0 { INFINITE_DEPTH } else { 0 };
-                peakPerBlock.resize(patch.size_uv0.0 * patch.size_uv0.1, peak_number);
-
-                // C++ version iterate through i64 but the patch.size and others use size_t
-                for v in 0..patch.size_v {
-                    for u in 0..patch.size_u {
-                        let p = v * patch.size_u + u;
-                        let depth0 = patch.depth.0[p];
-                        if depth0 == INFINITE_DEPTH {
-                            continue;
-                        }
-
-                        let u0 = u / patch.occupancy_resolution;
-                        let v0 = v / patch.occupancy_resolution;
-                        let p0 = v0 * patch.size_uv0.0 + u0;
-
-                        if patch.projection_mode == 0 {
-                            peakPerBlock[p0] = peakPerBlock[p0].min(depth0);
-                        } else {
-                            peakPerBlock[p0] = peakPerBlock[p0].max(depth0);
-                        }
-                    }
-                }
-
-                // debug!("Do Depth refinement");
-                // debug!("u: {}, v: {}", patch.size_u, patch.size_v);
+                // let mut peakPerBlock: Vec<i16> = Vec::new();
+                // let peak_number = if patch.projection_mode == 0 { INFINITE_DEPTH } else { 0 };
+                // peakPerBlock.resize(patch.size_uv0.0 * patch.size_uv0.1, peak_number);
+                //
+                // // C++ version iterate through i64 but the patch.size and others use size_t
+                // for v in 0..patch.size_v {
+                //     for u in 0..patch.size_u {
+                //         let p = v * patch.size_u + u;
+                //         let depth0 = patch.depth.0[p];
+                //         if depth0 == INFINITE_DEPTH {
+                //             continue;
+                //         }
+                //
+                //         let u0 = u / patch.occupancy_resolution;
+                //         let v0 = v / patch.occupancy_resolution;
+                //         let p0 = v0 * patch.size_uv0.0 + u0;
+                //
+                //         if patch.projection_mode == 0 {
+                //             peakPerBlock[p0] = peakPerBlock[p0].min(depth0);
+                //         } else {
+                //             peakPerBlock[p0] = peakPerBlock[p0].max(depth0);
+                //         }
+                //     }
+                // }
+                //
+                // // debug!("Do Depth refinement");
+                // // debug!("u: {}, v: {}", patch.size_u, patch.size_v);
                 // for v in 0..patch.size_v  {
                 //     for u in 0..patch.size_u {
                 //         let p = v * patch.size_u + u;
                 //         let depth0 = patch.depth.0[p];
                 //
-                //         debug!("p: {}, d: {}", p, depth0);
                 //         if depth0 == INFINITE_DEPTH {
                 //             continue;
                 //         }
@@ -761,17 +757,18 @@ impl PatchSegmenter {
                 //         let p0 = v0 * patch.size_uv0.0 + u0;
                 //
                 //         let tmp_a = (depth0 - peakPerBlock[p0]).abs();
-                //         // ZICO: This code is problematic all depth is made infinite, is it the tmp calculation?
-                //         // I think we can ignore this for now
                 //         let tmp_b = surface_thickness as i16 + projection_direction_type * depth0;
                 //         let tmp_c = projection_direction_type * patch.d1 as i16 + max_allowed_depth as i16;
                 //
-                //         if depth0 != INFINITE_DEPTH {
-                //             if tmp_a > 32 || tmp_b > tmp_c {
-                //                 patch.depth.0[p] = INFINITE_DEPTH;
-                //                 patch.depth_0pc_idx[p] = INFINITE_NUMBER;
-                //             }
-                //         }
+                //         // ZICO: This code is problematic all depth is made infinite, is it the tmp calculation?
+                //         // I think we can ignore this for now
+                //         // if depth0 != INFINITE_DEPTH {
+                //         //     if tmp_a > 32 || tmp_b > tmp_c {
+                //         //         patch.depth.0[p] = INFINITE_DEPTH;
+                //         //         patch.depth_0pc_idx[p] = INFINITE_NUMBER;
+                //         //     }
+                //         // }
+                //
                 //
                 //         if depth0 != INFINITE_DEPTH {
                 //             if tmp_a > 32 {
@@ -779,7 +776,6 @@ impl PatchSegmenter {
                 //                 patch.depth_0pc_idx[p] = INFINITE_NUMBER;
                 //             }
                 //         }
-                //         debug!("p: {}, d: {}", p, patch.depth.0[p]);
                 //     }
                 // }
 
@@ -803,7 +799,7 @@ impl PatchSegmenter {
                             let point = points.positions[i];
                             // C++ version round down, but the values are all int
                             let d = point[normal_axis] as i16;
-                            let u = point[tangent_axis] as usize - patch.uv1.0 ;
+                            let u = point[tangent_axis] as usize - patch.uv1.0;
                             let v = point[bitangent_axis] as usize - patch.uv1.1;
                             assert!(u >= 0 && u < patch.size_u);
                             assert!(v >= 0 && v < patch.size_v);
@@ -811,7 +807,7 @@ impl PatchSegmenter {
                             let depth_0 = patch.depth.0[p];
                             let delta_d = projection_direction_type * (d - depth_0);
                             // ZICO: C++ version do this instead of depth0 >= INFINITE DEPTH
-                            if !(depth_0 < INFINITE_DEPTH) {continue};
+                            if !(depth_0 < INFINITE_DEPTH) { continue };
                             let is_color_similar = Self::colorSimilarity(
                                 &frame_pcc_color[i],
                                 &frame_pcc_color[patch.depth_0pc_idx[p] as usize], 128);
@@ -837,8 +833,6 @@ impl PatchSegmenter {
                         }
                     }
                 }
-                let duration = start.elapsed();
-                debug!("Time taken to generate patch: {:?}", duration);
 
                 patch.size_d = 0;
                 let mut rec: PointSet3 = PointSet3::default();
@@ -846,15 +840,15 @@ impl PatchSegmenter {
                 let mut point_count: Vec<usize> = Vec::new();
                 point_count.resize(3, 0);
 
-                let start = Instant::now();
+                let resample_start = Instant::now();
                 Self::resample_point_cloud(
                     &mut point_count, &mut resampled, &mut resampled_patch_partition, patch,
                     patch_index, params.map_count_minus_1 > 0, surface_thickness,
                     eom_fix_bit_count, is_additional_projection_plane, use_enhanced_occupancy_map_code,
-                    geometry_bit_depth_3d, create_sub_point_cloud, &mut rec
+                    geometry_bit_depth_3d, create_sub_point_cloud
                 );
-                let duration = start.elapsed();
-                debug!("Time taken to resample point cloud: {:?}", duration);
+                let resample_duration = resample_start.elapsed();
+                debug!("Time taken to resample point cloud: {:?}", resample_duration);
 
                 d0_count_per_patch = point_count[0];
                 d1_count_per_patch = point_count[1];
@@ -883,17 +877,22 @@ impl PatchSegmenter {
                 if use_enhanced_occupancy_map_code {
                     unimplemented!("Enhanced Occupancy Map")
                 }
-                println!(
-                    "\t\t Patch {} ->(d1,u1,v1)=({}, {}, {})(dd,du,dv)=({}, {}, {}), Normal: {}, Direction: {}, EOM: {}",
-                    patch_index, patch.d1, patch.uv1.0, patch.uv1.1, patch.size_d,
-                    patch.size_u, patch.size_v, patch.axes.0 as usize, patch.projection_mode, patch.eom_and_d1_count
-                );
+                // println!(
+                //     "\t\t Patch {} ->(d1,u1,v1)=({}, {}, {})(dd,du,dv)=({}, {}, {}), Normal: {}, Direction: {}, EOM: {}",
+                //     patch_index, patch.d1, patch.uv1.0, patch.uv1.1, patch.size_d,
+                //     patch.size_u, patch.size_v, patch.axes.0 as usize, patch.projection_mode, patch.eom_and_d1_count
+                // );
             }
+            let resample_tree_start = Instant::now();
             let mut kd_tree_resampled = PCCKdTree::new();
             kd_tree_resampled.build_from_point_set(&resampled);
+            let resample_tree_duration = resample_tree_start.elapsed();;
+            debug!("Time taken to generate resample kd tree: {:?}", resample_tree_duration);
+
             raw_points.clear();
             // ZICO: this one check the distance diff between resampled and original then readd if too far
             // Should double check if nanoflann use square distance
+            let resample_tree_query_start = Instant::now();
             for i in 0..point_count {
                 // Compare with original version how close is it
                 let result = kd_tree_resampled.search(&points.positions[i], 1);
@@ -901,6 +900,12 @@ impl PatchSegmenter {
                 raw_points_distance[i] = dist2;
                 if dist2 > max_allowed_dist2_raw_points_selection { raw_points.push(i); }
             }
+            let resample_tree_query_duration = resample_tree_query_start.elapsed();
+            debug!("Time taken to query resample kd tree: {:?}", resample_tree_query_duration);
+
+            let patch_duration = patch_start.elapsed();
+            debug!("Time taken to generate patch: {:?}", patch_duration);
+
             if enable_point_cloud_partitioning {
                 unimplemented!("Point Cloud Partitioning")
             }
@@ -929,9 +934,7 @@ impl PatchSegmenter {
         use_enhanced_occupancy_map_code: bool,
         geometry_bit_depth_3d: usize,
         create_sub_point_cloud: bool,
-        rec: &mut PointSet3,
     ) {
-        println!("Resampling Point Cloud");
         let normal_axis = patch.axes.0 as usize;
         let tangent_axis = patch.axes.1 as usize;
         let bitangent_axis = patch.axes.2 as usize;
@@ -946,8 +949,6 @@ impl PatchSegmenter {
         for v in 0..patch.size_v {
             for u in 0..patch.size_u {
                 let p = v * patch.size_u + u;
-                debug!("Patch Depth: {}", patch.depth.0[p]);
-                debug!("INFINITE_DEPTH: {}", INFINITE_DEPTH);
                 if patch.depth.0[p] < INFINITE_DEPTH {
                     let depth0 = patch.depth.0[p];
 
@@ -1046,7 +1047,6 @@ impl PatchSegmenter {
                         } else if !use_enhanced_occupancy_map_code
                             || point_eom[normal_axis] != point[normal_axis]
                         {
-                            debug!("add {:?}", point);
                             resampled.add_point_from_vector_3d(point.clone());
                             resampled_patch_partition.push(patch_index);
                             // if create_sub_point_cloud {
