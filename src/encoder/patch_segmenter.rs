@@ -1,6 +1,7 @@
 use std::cmp::min;
 use std::collections::HashMap;
 use std::ffi::c_double;
+use std::time::Instant;
 use cgmath::{InnerSpace, Vector3};
 use fast_math::log2;
 use kdtree::KdTree;
@@ -176,10 +177,10 @@ impl PatchSegmenter {
         if params.grid_based_refine_segmentation {
             unimplemented!("grid-based refine segmentation")
         } else {
-            // Self::refine_segmentation(
-            //     geometry_vox, &kd_tree, &orientations, orientations_count, params.max_nn_count_refine_segmentation,
-            //     params.lambda_refine_segmentation, params.iteration_count_refine_segmentation, &mut partition
-            // )
+            Self::refine_segmentation(
+                geometry_vox, &kd_tree, &orientations, orientations_count, params.max_nn_count_refine_segmentation,
+                params.lambda_refine_segmentation, params.iteration_count_refine_segmentation, &mut partition
+            )
         }
 
         if params.grid_based_segmentation {
@@ -263,13 +264,13 @@ impl PatchSegmenter {
             });
         }
 
-        let mut m: HashMap<i32, usize> = HashMap::new();
-        for i in &partition {
-            *m.entry(*i as i32).or_default() += 1;
-        }
-        for i in m.into_iter() {
-            println!("Freq of {} is {}", i.0, i.1);
-        }
+        // let mut m: HashMap<i32, usize> = HashMap::new();
+        // for i in &partition {
+        //     *m.entry(*i as i32).or_default() += 1;
+        // }
+        // for i in m.into_iter() {
+        //     println!("Freq of {} is {}", i.0, i.1);
+        // }
 
         // ZICO: Can be made functional
         #[cfg(not(feature = "use_rayon"))]
@@ -529,18 +530,19 @@ impl PatchSegmenter {
         /// Process Raw Points
         ///
         while !raw_points.is_empty() {
-            println!("process raw point");
             // This algo go through all raw points. Group them into connected components
             // until no more raw points
+
+            /// Generate Connected Components
+            ///
+            let start = Instant::now(); // Start timing
             let mut connected_components: Vec<Vec<usize>> = Vec::new();
             if !enable_point_cloud_partitioning {
                 let mut fifo: Vec<usize> = Vec::with_capacity(point_count);
 
-                // ZICO: its just check if points have been visited
                 let mut flags: Vec<bool> = vec![false; point_count];
                 for i in &raw_points { flags[*i] = true }
 
-                // ZICO: Can try changing 256
                 connected_components.reserve(256);
 
                 // ZICO: Must we go through all points for each connected components?
@@ -562,12 +564,6 @@ impl PatchSegmenter {
                             let current = fifo.pop().unwrap();
                             for neighbour in &adj[current] {
                                 let neighbour = *neighbour;
-                                // If the neighbour is also within the same partition
-                                // and if the neighbour has not been in any connected components
-                                // we consider them to be in the same connected components
-                                // Current adj list implementation has point also be connected to itself
-                                // For now lets just add neigbour != current check
-                                // ZICO: come back to this latyer
                                 if partition[neighbour] == cluster_index && flags[neighbour] && neighbour != current {
                                     flags[neighbour] = false;
                                     fifo.push(neighbour);
@@ -578,34 +574,31 @@ impl PatchSegmenter {
                         if connected_component.len() < min_point_count_per_cc {
                             connected_components.resize(connected_components_index, vec![]);
                         } else {
-                            println!("\t\t CC {} -> {}", connected_components_index, connected_components.len());
+                            // println!("\t\t CC {} -> {}", connected_components_index, connected_components.len());
                         }
                     }
                 }
             } else {
                 unimplemented!("cloud partitioning")
             }
-            debug!("Num of connected components: {}", connected_components.len());
+            let duration = start.elapsed();
+            debug!("Time taken to create connected components: {:?}", duration);
             if connected_components.is_empty() {break;}
             if high_gradient_separation {
-                unimplemented!("separate high hradient points")
+                unimplemented!("separate high gradient points")
             }
             if patch_expansion_enabled {
                 unimplemented!("patch expansion enabled")
             }
 
-            debug!("Num of connected components: {}", connected_components.len());
-            // Now we finally start creating the patch
-            // Maybe make this its own function?
+            /// Patch generation
             for connected_component in connected_components.iter() {
+                let start = Instant::now();
                 let patch_index = patches.len();
 
-                // ZICO: Is this technique faster?
-                // Why not instantiate a patch then push to patches
                 patches.resize(patch_index + 1, Patch::default());
                 let mut patch = patches.get_mut(patch_index).unwrap();
 
-                // ZICO: By right i need only d0 for now right?
                 let mut d0_count_per_patch: usize = 0;
                 let mut d1_count_per_patch: usize = 0;
                 let mut eom_count_per_patch: usize = 0;
@@ -619,8 +612,6 @@ impl PatchSegmenter {
                 patch.set_view_id(cluster_index as u8);
                 patch.set_best_match_idx(INVALID_PATCH_INDEX);
 
-
-                // Initialize GPAData
                 patch.cur_gpa_patch_data.initialize();
                 patch.pre_gpa_patch_data.initialize();
 
@@ -727,13 +718,12 @@ impl PatchSegmenter {
                 patch.size_uv0.1 += 1;
                 patch.occupancy.resize(patch.size_uv0.0 * patch.size_uv0.1, false);
 
-                // filter depth
+                /// filter depth
                 let mut peakPerBlock: Vec<i16> = Vec::new();
                 let peak_number = if patch.projection_mode == 0 { INFINITE_DEPTH } else { 0 };
                 peakPerBlock.resize(patch.size_uv0.0 * patch.size_uv0.1, peak_number);
 
                 // C++ version iterate through i64 but the patch.size and others use size_t
-                debug!("Do peak finding");
                 for v in 0..patch.size_v {
                     for u in 0..patch.size_u {
                         let p = v * patch.size_u + u;
@@ -748,14 +738,12 @@ impl PatchSegmenter {
 
                         if patch.projection_mode == 0 {
                             peakPerBlock[p0] = peakPerBlock[p0].min(depth0);
-                            debug!("peak: {}", peakPerBlock[p0]);
                         } else {
                             peakPerBlock[p0] = peakPerBlock[p0].max(depth0);
                         }
                     }
                 }
 
-                // ZICO: This code is problematic
                 // debug!("Do Depth refinement");
                 // debug!("u: {}, v: {}", patch.size_u, patch.size_v);
                 // for v in 0..patch.size_v  {
@@ -773,11 +761,20 @@ impl PatchSegmenter {
                 //         let p0 = v0 * patch.size_uv0.0 + u0;
                 //
                 //         let tmp_a = (depth0 - peakPerBlock[p0]).abs();
+                //         // ZICO: This code is problematic all depth is made infinite, is it the tmp calculation?
+                //         // I think we can ignore this for now
                 //         let tmp_b = surface_thickness as i16 + projection_direction_type * depth0;
                 //         let tmp_c = projection_direction_type * patch.d1 as i16 + max_allowed_depth as i16;
                 //
                 //         if depth0 != INFINITE_DEPTH {
                 //             if tmp_a > 32 || tmp_b > tmp_c {
+                //                 patch.depth.0[p] = INFINITE_DEPTH;
+                //                 patch.depth_0pc_idx[p] = INFINITE_NUMBER;
+                //             }
+                //         }
+                //
+                //         if depth0 != INFINITE_DEPTH {
+                //             if tmp_a > 32 {
                 //                 patch.depth.0[p] = INFINITE_DEPTH;
                 //                 patch.depth_0pc_idx[p] = INFINITE_NUMBER;
                 //             }
@@ -789,75 +786,75 @@ impl PatchSegmenter {
                 if eom_single_layer_mode {
                     unimplemented!("eom single layer mode");
                 } else {
-                    debug!("Patch depth size: {}", patch.depth.0.len());
                     patch.depth.1 = patch.depth.0.clone();
-                    debug!("Patch depth size: {}", patch.depth.1.len());
                     let patch_surface_thickness = surface_thickness;
                     if use_surface_separation {
                         unimplemented!("Use surface separation")
                     }
 
                     // ZICO:: This code is problematic
-                    // if patch_surface_thickness > 0 {
-                    //     for i in connected_component {
-                    //         let i = *i;
-                    //         // let pointTmp = points.positions[i];
-                    //         if is_additional_projection_plane {
-                    //             unimplemented!("Additional Projection Plane")
-                    //         }
-                    //         let point = points.positions[i];
-                    //         // C++ version round down, but the values are all int
-                    //         let d = point[normal_axis] as i16;
-                    //         let u = point[tangent_axis] as usize - patch.uv1.0 ;
-                    //         let v = point[bitangent_axis] as usize - patch.uv1.1;
-                    //         assert!(u >= 0 && u < patch.size_u);
-                    //         assert!(v >= 0 && v < patch.size_v);
-                    //         let p = v * patch.size_u + u;
-                    //         let depth_0 = patch.depth.0[p];
-                    //         let delta_d = projection_direction_type * (d - depth_0);
-                    //         // ZICO: C++ version do this instead of depth0 >= INFINITE DEPTH
-                    //         if !(depth_0 < INFINITE_DEPTH) {continue};
-                    //         let is_color_similar = Self::colorSimilarity(
-                    //             &frame_pcc_color[i],
-                    //             &frame_pcc_color[patch.depth_0pc_idx[p] as usize], 128);
-                    //         if depth_0 < INFINITE_DEPTH
-                    //             && delta_d <= patch_surface_thickness as i16
-                    //             && delta_d >= 0 && is_color_similar {
-                    //             if (projection_direction_type * (d - patch.depth.1[p])) > 0 {
-                    //                 patch.depth.1.resize(p, d);
-                    //             }
-                    //             if use_enhanced_occupancy_map_code {
-                    //                 unimplemented!("enhanced occupancy map")
-                    //             }
-                    //         }
-                    //         if patch.projection_mode == 0 && patch.depth.1[p] < patch.depth.0[p]
-                    //             || patch.projection_mode == 1 && patch.depth.1[p] > patch.depth.0[p] {
-                    //             println!(
-                    //                 "ERROR: d1({}) and d0({}) for projection mode[{}]",
-                    //                 patch.depth.1[p],
-                    //                 patch.depth.0[p],
-                    //                 patch.projection_mode
-                    //             );
-                    //         }
-                    //     }
-                    // }
+                    if patch_surface_thickness > 0 {
+                        for i in connected_component {
+                            let i = *i;
+                            // let pointTmp = points.positions[i];
+                            if is_additional_projection_plane {
+                                unimplemented!("Additional Projection Plane")
+                            }
+                            let point = points.positions[i];
+                            // C++ version round down, but the values are all int
+                            let d = point[normal_axis] as i16;
+                            let u = point[tangent_axis] as usize - patch.uv1.0 ;
+                            let v = point[bitangent_axis] as usize - patch.uv1.1;
+                            assert!(u >= 0 && u < patch.size_u);
+                            assert!(v >= 0 && v < patch.size_v);
+                            let p = v * patch.size_u + u;
+                            let depth_0 = patch.depth.0[p];
+                            let delta_d = projection_direction_type * (d - depth_0);
+                            // ZICO: C++ version do this instead of depth0 >= INFINITE DEPTH
+                            if !(depth_0 < INFINITE_DEPTH) {continue};
+                            let is_color_similar = Self::colorSimilarity(
+                                &frame_pcc_color[i],
+                                &frame_pcc_color[patch.depth_0pc_idx[p] as usize], 128);
+                            if depth_0 < INFINITE_DEPTH
+                                && delta_d <= patch_surface_thickness as i16
+                                && delta_d >= 0 && is_color_similar {
+                                if (projection_direction_type * (d - patch.depth.1[p])) > 0 {
+                                    patch.depth.1[p] = d;
+                                }
+                                if use_enhanced_occupancy_map_code {
+                                    unimplemented!("enhanced occupancy map")
+                                }
+                            }
+                            if patch.projection_mode == 0 && patch.depth.1[p] < patch.depth.0[p]
+                                || patch.projection_mode == 1 && patch.depth.1[p] > patch.depth.0[p] {
+                                println!(
+                                    "ERROR: d1({}) and d0({}) for projection mode[{}]",
+                                    patch.depth.1[p],
+                                    patch.depth.0[p],
+                                    patch.projection_mode
+                                );
+                            }
+                        }
+                    }
                 }
+                let duration = start.elapsed();
+                debug!("Time taken to generate patch: {:?}", duration);
+
                 patch.size_d = 0;
                 let mut rec: PointSet3 = PointSet3::default();
                 // ZICO: C++ version resize to 0, dunno whats the advantage
                 let mut point_count: Vec<usize> = Vec::new();
                 point_count.resize(3, 0);
-                // ZICO: This is problematic
+
+                let start = Instant::now();
                 Self::resample_point_cloud(
                     &mut point_count, &mut resampled, &mut resampled_patch_partition, patch,
                     patch_index, params.map_count_minus_1 > 0, surface_thickness,
                     eom_fix_bit_count, is_additional_projection_plane, use_enhanced_occupancy_map_code,
                     geometry_bit_depth_3d, create_sub_point_cloud, &mut rec
                 );
-
-                for points in &resampled.positions {
-                    debug!("{:?}", points);
-                }
+                let duration = start.elapsed();
+                debug!("Time taken to resample point cloud: {:?}", duration);
 
                 d0_count_per_patch = point_count[0];
                 d1_count_per_patch = point_count[1];
@@ -894,8 +891,6 @@ impl PatchSegmenter {
             }
             let mut kd_tree_resampled = PCCKdTree::new();
             kd_tree_resampled.build_from_point_set(&resampled);
-            debug!("{:?}", resampled.positions);
-            debug!("{:?}", points.positions);
             raw_points.clear();
             // ZICO: this one check the distance diff between resampled and original then readd if too far
             // Should double check if nanoflann use square distance
@@ -916,7 +911,7 @@ impl PatchSegmenter {
                 println!(" # EOM points {}", number_of_eom);
             }
         }
-        // ZICO: C++ version did a lossy conversion from f64 to f32
+        // ZICO: C++ version did a conversion from f64 to f32
         *distance_source_rec = (mean_yab + mean_uab + mean_vab + mean_yba + mean_uba + mean_vba) as f32;
         patches
     }
@@ -948,9 +943,6 @@ impl PatchSegmenter {
         // projection = 0 -> 1, projection = 1 -> -1
         let projection_type_indication = -2 * (patch.projection_mode as i16) + 1;
 
-        debug!("size_v: {}, size_u: {}", patch.size_v, patch.size_u);
-        debug!("v0: {}, u0: {}", patch.uv0.1, patch.uv0.0);
-        debug!("v1: {}, u1: {}", patch.uv1.1, patch.uv1.0);
         for v in 0..patch.size_v {
             for u in 0..patch.size_u {
                 let p = v * patch.size_u + u;
@@ -987,7 +979,6 @@ impl PatchSegmenter {
                         //     rec.add_point_from_vector_3d(point_tmp);
                         // }
                     } else {
-                        debug!("Added");
                         resampled.add_point_from_vector_3d(point);
                         resampled_patch_partition.push(patch_index);
                         if create_sub_point_cloud {

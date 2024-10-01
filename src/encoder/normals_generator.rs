@@ -122,7 +122,7 @@ impl NormalsGenerator3 {
         let mut eigenval = Vector3::zero();
         let mut cov_mat = Matrix3::zero();
 
-        let n_neighbors = kd_tree.search(&point_cloud.positions[index], 10);
+        let n_neighbors = kd_tree.search(&point_cloud.positions[index], 100);
 
         if n_neighbors.len() > 1 {
             // Compute barycenter
