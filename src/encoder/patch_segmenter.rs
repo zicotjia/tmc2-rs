@@ -1,4 +1,4 @@
-use std::cmp::min;
+use std::cmp::{min, PartialEq};
 use std::collections::HashMap;
 use std::ffi::c_double;
 use std::time::Instant;
@@ -6,7 +6,8 @@ use cgmath::{InnerSpace, Vector3};
 use fast_math::log2;
 use kdtree::KdTree;
 use log::debug;
-use num_traits::abs;
+use nalgebra::geometry;
+use num_traits::{abs, Zero};
 use num_traits::real::Real;
 use crate::common::{INFINITE_DEPTH, INFINITE_NUMBER, INVALID_PATCH_INDEX};
 use crate::common::math::BoundingBox;
@@ -16,6 +17,7 @@ use crate::encoder::Vector3D;
 use crate::encoder::constants::orientations::{orientations6, orientations6Count};
 use crate::encoder::kd_tree::{NNResult, PCCKdTree};
 use rayon::prelude::*;
+use crate::encoder::normals_generator::{NormalsGenerator3, NormalsGenerator3Parameters, NormalsGeneratorOrientation};
 
 type Voxels = HashMap<u64, Vec<usize>>;
 
@@ -72,8 +74,8 @@ pub struct PatchSegmenterParams {
     pub num_cuts_along_3rd_longest_axis: i32,
 }
 
-impl Default for PatchSegmenterParams {
-    fn default() -> Self {
+impl PatchSegmenterParams {
+    pub fn new() -> Self {
         PatchSegmenterParams {
             grid_based_segmentation: false,
             voxel_dimension_grid_based_segmentation: 2,
@@ -81,7 +83,7 @@ impl Default for PatchSegmenterParams {
             normal_orientation: 1,
             grid_based_refine_segmentation: false,
             max_nn_count_refine_segmentation: 256,
-            iteration_count_refine_segmentation: 10,
+            iteration_count_refine_segmentation: 100,
             voxel_dimension_refine_segmentation: 4,
             search_radius_refine_segmentation: 192,
             occupancy_resolution: 16,
@@ -89,7 +91,61 @@ impl Default for PatchSegmenterParams {
             max_patch_size: 1024,
             quantizer_size_x: 1 << 4,
             quantizer_size_y: 1 << 4,
-            min_point_count_per_cc_patch_segmentation: 5,
+            min_point_count_per_cc_patch_segmentation: 16,
+            max_nn_count_patch_segmentation: 16,
+            surface_thickness: 4,
+            eom_fix_bit_count: 0,
+            eom_single_layer_mode: false,
+            map_count_minus_1: 1,
+            min_level: 64,
+            max_allowed_depth: 0,
+            max_allowed_dist_2_raw_points_detection: 9.0,
+            max_allowed_dist_2_raw_points_selection: 9.0,
+            lambda_refine_segmentation: 3.0,
+            use_enhanced_occupancy_map_code: false,
+            absolute_d1: false,
+            create_sub_point_cloud: false,
+            surface_separation: false,
+            weight_normal: Vector3 { x: 1.0, y: 1.0, z: 1.0 },
+            additional_projection_plane_mode: 0,
+            partial_additional_projection_plane: 0.0,
+            geometry_bit_depth_2d: 8,
+            geometry_bit_depth_3d: 10,
+            patch_expansion: false,
+            high_gradient_separation: false,
+            min_gradient: 15.0,
+            min_num_high_gradient_points: 256,
+            enable_point_cloud_partitioning: false,
+            roi_bounding_box_min_x: vec![],
+            roi_bounding_box_max_x: vec![],
+            roi_bounding_box_min_y: vec![],
+            roi_bounding_box_max_y: vec![],
+            roi_bounding_box_min_z: vec![],
+            roi_bounding_box_max_z: vec![],
+            num_tiles_hor: 2,
+            tile_height_to_width_ratio: 1.0,
+            num_cuts_along_1st_longest_axis: 0,
+            num_cuts_along_2nd_longest_axis: 0,
+            num_cuts_along_3rd_longest_axis: 0,
+        }
+    }
+    pub fn new_grid_based() -> Self {
+        PatchSegmenterParams {
+            grid_based_segmentation: true,
+            voxel_dimension_grid_based_segmentation: 2,
+            nn_normal_estimation: 16,
+            normal_orientation: 1,
+            grid_based_refine_segmentation: true,
+            max_nn_count_refine_segmentation: 384,
+            iteration_count_refine_segmentation: 5,
+            voxel_dimension_refine_segmentation: 2,
+            search_radius_refine_segmentation: 128,
+            occupancy_resolution: 1,
+            enable_patch_splitting: false,
+            max_patch_size: 1024,
+            quantizer_size_x: 1 << 4,
+            quantizer_size_y: 1 << 4,
+            min_point_count_per_cc_patch_segmentation: 16,
             max_nn_count_patch_segmentation: 16,
             surface_thickness: 4,
             eom_fix_bit_count: 0,
@@ -128,6 +184,11 @@ impl Default for PatchSegmenterParams {
         }
     }
 }
+impl Default for PatchSegmenterParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 #[derive(Clone, Default)]
 pub struct PatchSegmenter {
     pub nb_thread: usize,
@@ -136,7 +197,7 @@ pub struct PatchSegmenter {
 }
 impl PatchSegmenter {
     pub fn compute(
-        geometry: &PointSet3,
+        mut geometry: PointSet3,
         frame_index: usize,
         params: PatchSegmenterParams,
         sub_point_cloud: &mut Vec<PointSet3>,
@@ -146,21 +207,48 @@ impl PatchSegmenter {
         // ZICO: For now assume only the base 6 projection plane
         let orientations = orientations6;
         let orientations_count = orientations6Count;
-        let geometry_vox;
+        let mut geometry_vox;
+        let voxels;
 
         // ZICO: For now assumes gridBasedSegmentation is off
         if params.grid_based_segmentation {
-            unimplemented!("Grid based segmentation (Voxelization")
+            println!("Convert points to voxels");
+            (geometry_vox, voxels) = Self::convert_points_to_voxels(&geometry, params.geometry_bit_depth_3d, params.voxel_dimension_grid_based_segmentation);
+            println!("Done");
         } else {
-            geometry_vox = geometry;
+            voxels = Voxels::new();
+            geometry_vox = geometry.clone();
         }
 
-        // ZICO: For now assume PointSet always have a normal
+        // Build KDTree
+        println!("Computing normals for original point cloud... ");
+        let mut kd_tree = PCCKdTree::new();
+        kd_tree.build_from_point_set(&geometry_vox);
+
         if !geometry_vox.with_normals {
-            unimplemented!("Normal calculation")
+            let normal_gen_params = NormalsGenerator3Parameters {
+                view_point: Vector3::zero(),
+                radius_normal_smoothing: f64::MAX,
+                radius_normal_estimation: f64::MAX,
+                radius_normal_orientation: f64::MAX,
+                weight_normal_smoothing: f64::MAX,
+                number_of_nearest_neighbors_in_normal_smoothing: params.nn_normal_estimation,
+                number_of_nearest_neighbors_in_normal_estimation: params.nn_normal_estimation,
+                number_of_nearest_neighbors_in_normal_orientation: params.nn_normal_estimation,
+                number_of_iterations_in_normal_smoothing: 0,
+                orientation_strategy: NormalsGeneratorOrientation::PCC_NORMALS_GENERATOR_ORIENTATION_NONE,// params.nn_normal_estimation
+                store_eigenvalues: false,
+                store_number_of_nearest_neighbors_in_normal_estimation: false,
+                store_centroids: false,
+            };
+            let normal_generator = NormalsGenerator3::init(geometry_vox.point_count(), &normal_gen_params);
+            let normals = normal_generator.compute_normals(&geometry_vox, &kd_tree, &normal_gen_params);
+            geometry_vox.add_normals(normals);
         }
+        println!("Done");
         assert!(geometry_vox.with_normals);
 
+        println!("Computing initial segmentation...");
         let mut partition: Vec<usize>;
         // Initial Segmentation
         if params.additional_projection_plane_mode == 0 {
@@ -168,61 +256,127 @@ impl PatchSegmenter {
         } else {
             unimplemented!("initialSegmentation for additional projection plane")
         }
-
-        // Build KDTree
-        let mut kd_tree = PCCKdTree::new();
-        kd_tree.build_from_point_set(&geometry_vox);
+        println!("Done");
 
         // ZICO: For now lets skip all segmentation refinement
         if params.grid_based_refine_segmentation {
-            unimplemented!("grid-based refine segmentation")
+            println!("Refining segmentation (Grid-Based)");
+            Self::refine_segmentation_grid_based(
+                &geometry_vox, &orientations, orientations_count, params.max_nn_count_refine_segmentation,
+                params.lambda_refine_segmentation, params.iteration_count_refine_segmentation,
+                params.voxel_dimension_refine_segmentation, params.search_radius_refine_segmentation, &mut partition
+            )
         } else {
+            println!("Refining segmentation");
             Self::refine_segmentation(
-                geometry_vox, &kd_tree, &orientations, orientations_count, params.max_nn_count_refine_segmentation,
+                &geometry_vox, &kd_tree, &orientations, orientations_count, params.max_nn_count_refine_segmentation,
                 params.lambda_refine_segmentation, params.iteration_count_refine_segmentation, &mut partition
             )
         }
+        println!("Done");
 
         if params.grid_based_segmentation {
-            unimplemented!("Grid Based Segmentation")
+            println!("Applying Voxels data to point");
+            Self::apply_voxels_data_to_points(geometry.point_count(), params.geometry_bit_depth_3d,
+                                              params.voxel_dimension_grid_based_segmentation, &voxels, &mut geometry_vox, &mut partition);
+            println!("Done");
+            kd_tree.build_from_point_set(&geometry);
         }
 
+        geometry.normals = geometry_vox.normals;
         // ZICO: Implement Segment Patches
-
+        println!("Patch Segmentation");
         let patches = Self::segment_patches(
-            geometry, &kd_tree, &params, &mut partition, sub_point_cloud, distance_src_rec,
+            &geometry, &kd_tree, &params, &mut partition, sub_point_cloud, distance_src_rec,
             &orientations, orientations_count
         );
+        println!("Done");
 
     }
 
-    // ZICO: Come back later
-    // pub fn convert_points_to_voxels(
-    //     source: &PointSet3,
-    //     geo_bits: usize,
-    //     vox_dim: usize
-    // ) -> (PointSet3, Voxels) {
-    //     let geo_bits2 = geo_bits << 1;
-    //     let mut vox_dim_shift = 0;
-    //     let mut i = vox_dim;
-    //     while i > 1  {
-    //         vox_dim_shift += 1;
-    //         i >>= 1;
-    //     }
-    //     let vox_dim_half = vox_dim >> 1;
-    //     let mut voxel_point_set = PointSet3::default();
-    //     voxel_point_set.reserve(source.len());
-    //     let voxels = Voxels::new();
-    //
-    //     let sub_to_ind = |x: u64, y: u64, z: u64| -> u64 {
-    //         x + (y << geo_bits) + (z << geo_bits2)
-    //     };
-    //
-    //     for point in source.positions.iter() {
-    //         let x0 = ((point.x as usize) + vox_dim_half) >> vox_dim_shift;
-    //     }
-    //     (voxel_point_set, voxels)
-    // }
+    pub fn convert_points_to_voxels(
+        source: &PointSet3,
+        geo_bits: usize, // 10
+        vox_dim: usize // 2
+    ) -> (PointSet3, Voxels) {
+        let geo_bits2 = geo_bits << 1;
+        let mut vox_dim_shift = 0;
+        let mut i = vox_dim;
+        while i > 1  {
+            vox_dim_shift += 1;
+            i >>= 1;
+        }
+        let vox_dim_half = vox_dim >> 1;
+        let mut voxel_point_set = PointSet3::default();
+        voxel_point_set.reserve(source.len());
+        let mut voxels = Voxels::new();
+
+        let sub_to_ind = |x: u64, y: u64, z: u64| -> u64 {
+            x + (y << geo_bits) + (z << geo_bits2)
+        };
+
+        // C++ version params is usize, but in this code they cast to uint64 ??
+        for (i, point) in source.positions.iter().enumerate() {
+            let x0 = ((point.x as usize) + vox_dim_half) >> vox_dim_shift;
+            let y0  = ((point.y as usize) + vox_dim_half) >> vox_dim_shift;
+            let z0 = ((point.z as usize) + vox_dim_half) >> vox_dim_shift;
+            // Associate each points with a voxel
+            let p = sub_to_ind(x0 as u64, y0 as u64, z0 as u64);
+            if !voxels.contains_key(&p) {
+                voxels.entry(p).or_insert_with(|| Vec::with_capacity(vox_dim * vox_dim << 1));
+                let j = voxel_point_set.add_point(Vector3 { x: x0 as i16, y: y0 as i16, z: z0 as i16 });
+                if source.with_colors {
+                    voxel_point_set.add_colors();
+                    voxel_point_set.colors[j] = source.colors[i]
+                }
+            };
+            // Definitely will exist
+            voxels.get_mut(&p).unwrap().push(i);
+        }
+        (voxel_point_set, voxels)
+    }
+
+    pub fn apply_voxels_data_to_points(
+        point_count: usize,
+        geo_bits: usize,
+        vox_dim: usize,
+        voxels: &Voxels,
+        source_vox: &mut PointSet3,
+        partitions: &mut Vec<usize>
+    ) {
+        let mut partitions_tmp = vec![0; point_count];
+        let mut normals_tmp = vec![Vector3D::zero(); point_count];
+
+        let normals = &source_vox.normals;
+
+        let geo_bits2 = geo_bits << 1;
+        let mut vox_dim_shift = 0;
+        let mut i = vox_dim;
+        while i > 1 {
+            vox_dim_shift += 1;
+            i >>= 1;
+        }
+        let sub_to_ind = |point: Point3D| -> u64 {
+            point[0] as u64 + ((point[1] as u64) << geo_bits) + ((point[2] as u64) << geo_bits2)
+        };
+
+        for i in 0..source_vox.len() {
+            let partition = partitions[i];
+            let normal = &normals[i];
+            let pos = &source_vox.positions[i];
+            let indices = voxels.get(&sub_to_ind(*pos));
+            if let Some(indices) = indices {
+                for &index in indices {
+                    partitions_tmp[index] = partition;
+                    normals_tmp[index] = *normal;
+                }
+            }
+        }
+
+        // Swap partitions and normals
+        *partitions = partitions_tmp;
+        source_vox.normals = normals_tmp;
+    }
 
     // Segment into partitions based on the normal
     pub fn initial_segmentation(
@@ -290,6 +444,212 @@ impl PatchSegmenter {
             }
         }
         partition
+    }
+
+    pub fn refine_segmentation_grid_based(
+        points: &PointSet3,
+        orientations: &[Vector3D; 6],
+        orientation_count: usize,
+        max_nn_count: usize,
+        lambda: f64,
+        iteration_count: usize,
+        vox_dim: usize,
+        search_radius: usize,
+        partition: &mut Vec<usize>
+    ) {
+        let point_count = points.point_count();
+        let mut geo_max = points.positions[0][0];
+
+        for i in 0..point_count {
+            let pos = &points.positions[i];
+            geo_max = geo_max.max(pos[0]).max(pos[1]).max(pos[2]);
+        }
+
+        let mut geo_range = 1;
+        let mut i = geo_max - 1;
+        while i != 0i16 {
+            geo_range <<= 1;
+            i >>= 1;
+        }
+
+        let mut vox_dim_shift = 0;
+        let mut i = vox_dim;
+        while i > 1 {
+            vox_dim_shift += 1;
+            i >>= 1;
+        }
+
+        let grid_dim = geo_range >> vox_dim_shift;
+        let mut grid_dim_shift = 0;
+        i = grid_dim;
+        while i > 1 {
+            grid_dim_shift += 1;
+            i >>= 1;
+        }
+        let grid_dim_shift_sqr = grid_dim_shift << 1;
+        let vox_dim_half = vox_dim >> 1;
+
+        let sub_to_ind = |x: usize, y: usize, z: usize| -> usize {
+            (x + (y << grid_dim_shift) + (z << grid_dim_shift_sqr)) as usize
+        };
+
+        let mut grid_centers = PointSet3::default();
+        let mut grid_with_point_indices: HashMap<usize, PointIndicesOfGridCell> = HashMap::new();
+        let mut grid_with_attributes: HashMap<usize, AttributeOfGridCell> = HashMap::new();
+
+        let MAX_NUM_POINTS_IN_ONE_VOX: u32 = (vox_dim * vox_dim * vox_dim) as u32;
+
+        for i in 0..point_count {
+            let pos = &points.positions[i];
+            let x0 = ((pos[0] as usize + vox_dim_half) >> vox_dim_shift);
+            let y0 = ((pos[1] as usize + vox_dim_half) >> vox_dim_shift);
+            let z0 = ((pos[2] as usize + vox_dim_half) >> vox_dim_shift);
+
+            let p = sub_to_ind(x0, y0, z0);
+
+            if !grid_with_point_indices.contains_key(&p) {
+                grid_centers.add_point(Point3D::new(x0 as i16, y0 as i16, z0 as i16));
+                grid_with_point_indices.insert(p, PointIndicesOfGridCell::with_capacity(MAX_NUM_POINTS_IN_ONE_VOX as usize));
+                grid_with_attributes.insert(p, AttributeOfGridCell::with_orientation_count(orientation_count));
+            }
+            grid_with_point_indices.get_mut(&p).unwrap().add_point_index(i as u32);
+        }
+
+        let total_num_of_vox = grid_centers.point_count();
+
+        // Pre-processing steps
+        let mut point_indices_of_vox = Vec::with_capacity(total_num_of_vox);
+        let mut attribute_of_vox = Vec::with_capacity(total_num_of_vox);
+
+        for i in 0..total_num_of_vox {
+            let p = &grid_centers.positions[i];
+            let mut p_pi = grid_with_point_indices.remove(&sub_to_ind(p.x as usize, p.y as usize, p.z as usize)).unwrap();
+            let mut p_attr = grid_with_attributes.remove(&sub_to_ind(p.x as usize, p.y as usize, p.z as usize)).unwrap();
+
+            p_attr.set_num_of_total_points(p_pi.get_point_count() as u8);
+
+            // 1st voxel classification
+            p_attr.update_scores(p_pi.get_point_indices(), partition);
+
+            point_indices_of_vox.push(p_pi);
+            attribute_of_vox.push(p_attr);
+        }
+
+        // Search adjacent voxels within the search radius
+        let mut kd_tree = PCCKdTree::new();
+        kd_tree.build_from_point_set(&grid_centers);
+        let vox_search_radius = search_radius >> vox_dim_shift;
+        const MAX_NEIGHBOR_COUNT: usize = std::u16::MAX as usize;
+
+        let mut adj = compute_adjacency_info_in_radius(&grid_centers, &kd_tree, MAX_NEIGHBOR_COUNT, vox_search_radius);
+
+        // Candidates for the indirect edge voxels
+        let mut adj_dev: Vec<Vec<u32>> = vec![Vec::new(); total_num_of_vox];
+        let idv_search_range = if vox_dim >= 4 { 1 } else { 2 };
+
+        // Pre-processing steps
+        let mut weights: Vec<f64> = Vec::with_capacity(total_num_of_vox);
+
+        for i in 0..total_num_of_vox {
+            let p = grid_centers.positions[i];
+            adj_dev[i].reserve(128);
+
+            let mut nn_point_count = 0;
+            let mut current_adj_of_i = &mut adj[i];
+            let mut iter = current_adj_of_i.iter();
+
+            while let Some(&neighbor) = iter.next() {
+                // 2nd voxel classification
+                let q = grid_centers.positions[neighbor];
+                let x_abs = (p.x - q.x).abs();
+                let y_abs = (p.y - q.y).abs();
+                let z_abs = (p.z - q.z).abs();
+                if x_abs <= idv_search_range && y_abs <= idv_search_range && z_abs <= idv_search_range {
+                    adj_dev[i].push(neighbor as u32);
+                }
+                nn_point_count += point_indices_of_vox[neighbor].get_point_count();
+                if nn_point_count >= max_nn_count {
+                    break;
+                }
+            }
+
+            // Pre-computing weights
+            weights.push(lambda / nn_point_count as f64);
+
+            // Remove points from the adjacent list if there are more than max_nn_count
+            if iter.len() > 0 { current_adj_of_i.truncate(nn_point_count); }
+        }
+
+        let mut scores = vec![0.0; orientation_count];
+        let mut score_smooth = vec![0; orientation_count];
+
+        let mut iter = 0;
+        loop {
+            for i in 0..total_num_of_vox {
+                // If the current voxel belongs to N-EV (No edge-voxel), then refining steps are skipped.
+                let edge_of_i = attribute_of_vox[i].get_edge();
+                if edge_of_i == VoxEdge::NoEdge { continue; }
+                score_smooth.fill(0);
+
+                let current_adj_of_i = &adj[i];
+                for &j in current_adj_of_i {
+                    let score_smooth_of_adj = attribute_of_vox[j].get_score_smooth();
+                    for k in 0..orientation_count { score_smooth[k] += score_smooth_of_adj[k]; }
+                }
+
+                // 2nd voxel classification (indirect edge-voxel)
+                let mut ppi_of_score_smooth: usize = 0;
+                let mut max_score: u16 = 0;
+                for (index, score) in score_smooth.iter().enumerate() {
+                    if *score > max_score {
+                        ppi_of_score_smooth = index;
+                        max_score = *score;
+                    }
+                }
+                for &j in &adj_dev[i] {
+                    let j = j as usize;
+                    let edge_of_adj = attribute_of_vox[j].get_edge();
+                    let ppi = attribute_of_vox[j].get_ppi() as usize;
+                    if edge_of_adj == VoxEdge::NoEdge && ppi != ppi_of_score_smooth { attribute_of_vox[j].update_edge(VoxEdge::IndirectEdge); }
+                }
+
+                if edge_of_i != VoxEdge::MDirectEdge {
+                    let valid_num_of_scores = orientation_count - score_smooth.iter().filter(|&&x| x == 0).count();
+                    let vox_ppi = attribute_of_vox[i].get_ppi() as usize;
+                    if valid_num_of_scores == 1 && score_smooth[vox_ppi] > 0 { continue; }
+                }
+
+                let p_i = point_indices_of_vox[i].get_point_indices();
+                for &j in p_i {
+                    let j = j as usize;
+                    let normal = points.normals[j];
+                    for k in 0..orientation_count {
+                        scores[k] = normal.dot(orientations[k]) + weights[i] * score_smooth[k] as f64;
+                    }
+                    let max_index: usize = 0;
+                    let mut max_score: f64 = f64::MIN;
+                    for (index, score) in scores.iter().enumerate() {
+                        if *score > max_score {
+                            ppi_of_score_smooth = index;
+                            max_score = *score;
+                        }
+                    }
+                    partition[j as usize] = max_index
+                }
+                attribute_of_vox[i].set_updated_flag();
+            }
+
+            // Restart the values of score smooth
+            for i in 0..total_num_of_vox {
+                attribute_of_vox[i].update_scores(point_indices_of_vox[i].get_point_indices(), partition);
+            }
+            iter += 1;
+
+            // Check the iteration condition to break the loop
+            if iter >= iteration_count {
+                break;
+            }
+        }
     }
 
     pub fn refine_segmentation(
@@ -553,7 +913,6 @@ impl PatchSegmenter {
                         let connected_components_index = connected_components.len();
                         // There are 6 partitions for now
                         let cluster_index = partition[index];
-                        // Add an extra element
                         connected_components.resize(connected_components_index + 1, vec![]);
                         let mut connected_component = &mut connected_components[connected_components_index];
                         fifo.push(index);
@@ -570,8 +929,10 @@ impl PatchSegmenter {
                             }
                         }
                         if connected_component.len() < min_point_count_per_cc {
+                            // Drop CC
                             connected_components.resize(connected_components_index, vec![]);
                         } else {
+                            // Add CC
                             // println!("\t\t CC {} -> {}", connected_components_index, connected_components.len());
                         }
                     }
@@ -682,6 +1043,7 @@ impl PatchSegmenter {
                     let is_valid_point = if patch.projection_mode == 0 { patch.depth.0[p] > d }
                     else { patch.depth.0[p] == INFINITE_DEPTH || patch.depth.0[p] < d};
 
+                    /// Fill Depth 0
                     if is_valid_point {
                         let mut minD0 = patch.d1;
                         let mut maxD0 = patch.d1;
@@ -788,7 +1150,7 @@ impl PatchSegmenter {
                         unimplemented!("Use surface separation")
                     }
 
-                    // ZICO:: This code is problematic
+                    /// Fill Depth 1
                     if patch_surface_thickness > 0 {
                         for i in connected_component {
                             let i = *i;
@@ -848,7 +1210,7 @@ impl PatchSegmenter {
                     geometry_bit_depth_3d, create_sub_point_cloud
                 );
                 let resample_duration = resample_start.elapsed();
-                debug!("Time taken to resample point cloud: {:?}", resample_duration);
+                // debug!("Time taken to resample point cloud: {:?}", resample_duration);
 
                 d0_count_per_patch = point_count[0];
                 d1_count_per_patch = point_count[1];
@@ -890,7 +1252,7 @@ impl PatchSegmenter {
             debug!("Time taken to generate resample kd tree: {:?}", resample_tree_duration);
 
             raw_points.clear();
-            // ZICO: this one check the distance diff between resampled and original then readd if too far
+            // ZICO: this one check the distance diff between resampled and original then read if too far
             // Should double check if nanoflann use square distance
             let resample_tree_query_start = Instant::now();
             for i in 0..point_count {
@@ -1139,6 +1501,146 @@ impl PatchSegmenter {
             (color_d0[2] as i16 - color_d1_candidate[2] as i16).abs() < threshold as i16
     }
 }
+
+fn compute_adjacency_info_in_radius(
+    point_cloud: &PointSet3,
+    kd_tree: &PCCKdTree,
+    max_nn_count: usize,
+    radius: usize
+) -> Vec<Vec<usize>> {
+    let point_count = point_cloud.point_count();
+    let mut adj_matrix: Vec<Vec<usize>> = Vec::new();
+    adj_matrix.resize(point_count, vec![]);
+
+    #[cfg(feature = "use_rayon")]
+    {
+        adj_matrix
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(index, adj_list)| {
+                let point = &point_cloud.positions[index];
+                let result = kd_tree.searchRadius(point, max_nn_count, radius as f64);
+                *adj_list = result.indices;
+            });
+    }
+
+
+    #[cfg(not(feature = "use_rayon"))]
+    for (index, point) in point_cloud.positions.iter().enumerate() {
+        let result = kd_tree.searchRadius(point, max_nn_count, radius as f64);
+        adj_matrix[index] = result.indices;
+    }
+
+    adj_matrix
+}
+
+
+type PointIndicesVector = Vec<u32>;
+type ScoresVector = Vec<u16>;
+
+struct PointIndicesOfGridCell {
+    point_indices: PointIndicesVector
+}
+
+impl PointIndicesOfGridCell {
+    fn with_capacity(max_points: usize) -> Self { Self { point_indices: Vec::with_capacity(max_points), } }
+    fn get_point_indices(&self) -> &Vec<u32> { &self.point_indices }
+    fn add_point_index(&mut self, index: u32) { self.point_indices.push(index); }
+    fn get_point_count(&self) -> usize { self.point_indices.len() }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum VoxEdge {
+    NoEdge       = 0,  // one ppi-value in a voxel
+    IndirectEdge = 1,  // adjacent voxels of M_DIRECT_EDGE, S_DIRECT_EDGE
+    MDirectEdge  = 2,  // multiple points && more than two ppi-values in a voxel
+    SDirectEdge  = 3,  // single-point in a voxel, considered as a direct edge-voxel
+}
+
+struct AttributeOfGridCell {
+    score_smooth: ScoresVector,
+    vox_edge: VoxEdge,
+    update_flag: bool,
+    total_points: u8,
+    vox_ppi: u8
+}
+
+
+impl AttributeOfGridCell {
+    // Default constructor
+    pub fn new() -> Self {
+        Self {
+            score_smooth: Vec::new(),
+            vox_edge: VoxEdge::NoEdge,
+            update_flag: true,
+            total_points: 0,
+            vox_ppi: 0,
+        }
+    }
+
+    // Constructor with orientation count
+    pub fn with_orientation_count(orientation_count: usize) -> Self {
+        Self {
+            score_smooth: vec![0; orientation_count],
+            vox_edge: VoxEdge::NoEdge,
+            update_flag: true,
+            total_points: 0,
+            vox_ppi: 0,
+        }
+    }
+
+    pub fn get_score_smooth(&self) -> &ScoresVector {
+        &self.score_smooth
+    }
+
+    #[inline]
+    pub fn update_scores(
+        &mut self,
+        point_indices: &PointIndicesVector,
+        partitions: &[usize],
+    ) {
+        self.score_smooth.iter_mut().for_each(|s| *s = 0);
+        for &j in point_indices { self.score_smooth[partitions[j as usize]] += 1; }
+        // Update voxel type (1st voxel classification)
+        self.update_voxel_type_with_scores();
+    }
+
+    pub fn get_edge(&self) -> VoxEdge { self.vox_edge }
+    pub fn get_ppi(&self) -> u8 { self.vox_ppi }
+    pub fn update_edge(&mut self, vox_edge: VoxEdge) { self.vox_edge = vox_edge; }
+    pub fn set_updated_flag(&mut self) { self.update_flag = true; }
+
+    pub fn update_voxel_type_with_scores(&mut self) {
+        if !self.update_flag { return; }
+
+        // Update edge type
+        if self.vox_edge != VoxEdge::SDirectEdge {
+            let uniformity_idx = self.score_smooth.iter().filter(|&&x| x != 0).count();
+            self.vox_edge = if uniformity_idx == 1 { VoxEdge::NoEdge } else { VoxEdge::MDirectEdge };
+        }
+
+        // ZICO: PPI: preferred point index
+        // Update ppi. Get the first largest index
+        let mut max_index: usize = 0;
+        let mut max_score: u16 = 0;
+        // ZICO: Can optimise into peak finding algo
+        for (index, score) in self.score_smooth.iter().enumerate() {
+            if *score > max_score {
+                max_index = index;
+                max_score = *score;
+            }
+        }
+        self.vox_ppi = max_index as u8;
+        self.update_flag = false;
+    }
+
+    pub fn set_num_of_total_points(&mut self, point_count: u8) {
+        self.total_points = point_count;
+        self.vox_edge = if self.total_points == 1 { VoxEdge::SDirectEdge } else { VoxEdge::MDirectEdge };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use kdtree::KdTree;

@@ -40,40 +40,18 @@ fn test_patch_segmenter() {
     let duration = start.elapsed(); // Stop timing
     println!("Time taken by point_cloud conversion: {:?}", duration);
 
+    println!("Point cloud size: {}", point_cloud.point_count());
+
     let start = Instant::now(); // Start timing
     let mut kd_tree = PCCKdTree::new();
     kd_tree.build_from_point_set(&point_cloud);
     let duration = start.elapsed(); // Stop timing
     println!("Time taken to build kd tree : {:?}", duration);
+    let patch_segmenter_params = PatchSegmenterParams::new_grid_based();
+    // let patch_segmenter_params = PatchSegmenterParams::new();
 
     let start = Instant::now(); // Start timing
-    let param = NormalsGenerator3Parameters {
-        view_point: Vector3 {x: 0.0, y: 0.0, z: 0.0},
-        radius_normal_smoothing: 0.0,
-        radius_normal_estimation: 0.0,
-        radius_normal_orientation: 0.0,
-        weight_normal_smoothing: 0.0,
-        number_of_nearest_neighbors_in_normal_smoothing: 0,
-        number_of_nearest_neighbors_in_normal_estimation: 100,
-        number_of_nearest_neighbors_in_normal_orientation: 0,
-        number_of_iterations_in_normal_smoothing: 0,
-        orientation_strategy: NormalsGeneratorOrientation::PCC_NORMALS_GENERATOR_ORIENTATION_VIEW_POINT,
-        store_eigenvalues: false,
-        store_number_of_nearest_neighbors_in_normal_estimation: false,
-        store_centroids: false,
-    };
-    let mut normal_generator = NormalsGenerator3::init(point_cloud.point_count(), &param);
-    let normals = normal_generator.compute_normals(&point_cloud, &kd_tree, &param);
-
-    point_cloud.add_normals(normals);
-    let duration = start.elapsed(); // Stop timing
-    println!("Time taken to generate normal: {:?}", duration);
-
-
-    let patch_segmenter_params = PatchSegmenterParams::default();
-
-    let start = Instant::now(); // Start timing
-    PatchSegmenter::compute(&point_cloud,
+    PatchSegmenter::compute(point_cloud,
                             0,
                             patch_segmenter_params,
                             &mut vec![],

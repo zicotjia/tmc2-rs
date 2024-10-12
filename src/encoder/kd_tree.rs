@@ -70,6 +70,7 @@ impl PCCKdTree {
     }
 
     pub fn build_from_point_set(&mut self, point_set: &PointSet3) {
+        self.clear();
         point_set.positions.iter().enumerate().for_each(|(index, position)| {
             self.add(position, index)
         });
@@ -106,10 +107,10 @@ mod tests {
     #[test]
     fn test_search() {
         // Nearest neighbour of a in order = [a, b, c, d]
-        let a = Point3D { x: 1f64 as u16, y: 1f64 as u16, z: 1f64 as u16};
-        let b = Point3D { x: 2f64 as u16, y: 2f64 as u16, z: 2f64 as u16};
-        let c = Point3D { x: 0f64 as u16, y: 0f64 as u16, z: 0f64 as u16};
-        let d = Point3D { x: 3f64 as u16, y: 3f64 as u16, z: 3f64 as u16};
+        let a = Point3D { x: 1f64 as i16, y: 1f64 as i16, z: 1f64 as i16};
+        let b = Point3D { x: 2f64 as i16, y: 2f64 as i16, z: 2f64 as i16};
+        let c = Point3D { x: 0f64 as i16, y: 0f64 as i16, z: 0f64 as i16};
+        let d = Point3D { x: 3f64 as i16, y: 3f64 as i16, z: 3f64 as i16};
         let mut kdtree = PCCKdTree::new();
         kdtree.add(&a, 0);
         kdtree.add(&b, 1);

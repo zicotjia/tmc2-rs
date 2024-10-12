@@ -1,8 +1,10 @@
 use cgmath::{point1, Vector3};
+use num_traits::Zero;
 use unzip3::Unzip3;
 use crate::encoder::Vector3D;
 
-pub type Point3D = Vector3<u16>;
+// Bennet use u16, C++ version use i16
+pub type Point3D = Vector3<i16>;
 pub type Color3B = Vector3<u8>;
 
 type Color16bit = Vector3<u16>;
@@ -10,7 +12,7 @@ pub type Normal3D = Vector3<f64>;
 // type Matrix3D = Matrix3<usize>;
 
 // Set of point clouds
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PointSet3 {
     // NOTE: IF YOU UPDATE THIS STRUCT, dont forget to update resize and append point set.
     pub positions: Vec<Point3D>,
@@ -33,7 +35,7 @@ impl From<Vec<vivotk::formats::pointxyzrgba::PointXyzRgba>> for PointSet3 {
         let (positions, colors): (Vec<Point3D>, Vec<Color3B>) = value
             .into_iter()
             .map(|point| (
-                Point3D {x : point.x as u16, y: point.y as u16, z: point.z as u16},
+                Point3D {x : point.x as i16, y: point.y as i16, z: point.z as i16},
                 Color3B {x: point.r, y: point.g, z: point.b})
             ).unzip();
         PointSet3 { positions, colors, colors16bit: vec![], point_patch_indexes: vec![], normals: vec![], with_normals: false, with_colors: true }
@@ -47,7 +49,7 @@ impl From<Vec<vivotk::formats::pointxyzrgbanormal::PointXyzRgbaNormal>> for Poin
         let (positions, colors, normals): (Vec<Point3D>, Vec<Color3B>, Vec<Normal3D>) = value
             .into_iter()
             .map(|point| (
-                Point3D {x : point.x as u16, y: point.y as u16, z: point.z as u16},
+                Point3D {x : point.x as i16, y: point.y as i16, z: point.z as i16},
                 Color3B {x: point.r, y: point.g, z: point.b},
                 Normal3D {x: point.nx as f64, y: point.ny as f64, z: point.z as f64})
             ).unzip3();
@@ -76,7 +78,7 @@ impl PointSet3 {
     }
 
     pub(crate) fn add_point_from_vector_3d(&mut self, position: Vector3D) -> usize {
-        self.positions.push(Point3D::new(position.x as u16, position.y as u16, position.z as u16));
+        self.positions.push(Point3D::new(position.x as i16, position.y as i16, position.z as i16));
         if self.with_colors {
             self.colors.push(Color3B::new(127, 127, 127));
             self.colors16bit.push(Color16bit::new(0, 0, 0));
@@ -91,7 +93,7 @@ impl PointSet3 {
     /// set PointSet to use color
     pub(crate) fn add_colors(&mut self) {
         self.with_colors = true;
-        self.reserve(self.point_count());
+        self.resize(self.point_count());
     }
 
     pub(crate) fn append_point_set(&mut self, pointset: PointSet3) -> usize {
@@ -104,6 +106,18 @@ impl PointSet3 {
 
         // SKIP: self.resize(self.point_count()). for what?
         self.point_count()
+    }
+
+    pub(crate) fn resize(&mut self, size: usize) {
+        self.positions.resize(size, Vector3::zero());
+        if self.with_colors {
+            self.colors.resize(size, Vector3::zero());
+            self.colors16bit.resize(size, Vector3::zero());
+        }
+        if self.with_normals {
+            self.normals.resize(size, Vector3::zero());
+        }
+        self.point_patch_indexes.resize(size, (0, 0));
     }
 
     pub(crate) fn reserve(&mut self, size: usize) {

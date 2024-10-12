@@ -450,11 +450,11 @@ fn generate_points(
             patch.generate_point(u, v, d1)
         } else if patch.projection_mode == 0 {
             let mut point1 = point0;
-            point1[patch.axes.0 as usize] += d1;
+            point1[patch.axes.0 as usize] += d1 as i16;
             point1
         } else {
             let mut point1 = point0;
-            point1[patch.axes.0 as usize] -= d1;
+            point1[patch.axes.0 as usize] -= d1 as i16;
             point1
         };
         Some(point1)

@@ -941,9 +941,9 @@ impl Patch {
     pub(crate) fn generate_point(&self, u: usize, v: usize, depth: u16) -> Point3D {
         let mut point = Point3D::new(0, 0, 0);
         let (normal, tangent, bitangent) = self.axes;
-        point[normal as usize] = self.generate_normal_coordinate(depth) as u16;
-        point[tangent as usize] = (u * self.level_of_detail.0 + self.uv1.0) as u16;
-        point[bitangent as usize] = (v * self.level_of_detail.1 + self.uv1.1) as u16;
+        point[normal as usize] = self.generate_normal_coordinate(depth) as i16;
+        point[tangent as usize] = (u * self.level_of_detail.0 + self.uv1.0) as i16;
+        point[bitangent as usize] = (v * self.level_of_detail.1 + self.uv1.1) as i16;
         point
     }
 
