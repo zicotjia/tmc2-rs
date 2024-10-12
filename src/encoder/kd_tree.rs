@@ -54,6 +54,7 @@ impl From<Vec<(f64, &usize)>> for NNResult {
 }
 
 // C++ version use kdtree adapter, let's hardcode with kdtree crate for now
+#[derive(Clone)]
 pub struct PCCKdTree {
     pub kdtree_: KdTree<f64, usize, [f64; 3]>
 }

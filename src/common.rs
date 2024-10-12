@@ -71,3 +71,17 @@ pub(crate) const ORIENTATION_HORIZONTAL: [PatchOrientation; 8] = [
     Mirror,
     MRot180
 ];
+
+pub(crate) type Range = (i32, i32);
+pub(crate) struct Tile {
+    minU: i32,
+    maxU: i32,
+    minV: i32,
+    maxV: i32,
+}
+
+impl Tile {
+    pub fn new() {
+        Self {minU: -1, maxU: -1, minV: -1, maxV: -1};
+    }
+}

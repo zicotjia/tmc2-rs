@@ -16,7 +16,6 @@ pub struct BoundingBox {
     pub min: Vector3<f64>,
     // max values for x, y, z
     pub max: Vector3<f64>,
-
 }
 
 impl BoundingBox {
@@ -41,12 +40,14 @@ impl BoundingBox {
         unimplemented!("Box intersection not implemented")
     }
 
-    pub fn fullyContainsBox(&self, other: BoundingBox) -> bool {
+    pub fn fully_contains_box(&self, other: BoundingBox) -> bool {
         unimplemented!("Box contains box not implemented")
     }
 
-    pub fn fullyContainsPoint(&self, point: Vector3<f64>) -> bool {
-        unimplemented!("Box contains point not implemented")
+    pub fn fully_contains_point(&self, point: &Vector3<i16>) -> bool {
+        self.max.x >= point.x as f64  && self.min.x <= point.x as f64
+        && self.max.y >= point.y as f64 && self.min.y <= point.y as f64
+        && self.max.z >= point.z as f64 && self.min.z <= point.z as f64
     }
 }
 

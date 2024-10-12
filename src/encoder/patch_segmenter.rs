@@ -9,7 +9,7 @@ use log::debug;
 use nalgebra::geometry;
 use num_traits::{abs, Zero};
 use num_traits::real::Real;
-use crate::common::{INFINITE_DEPTH, INFINITE_NUMBER, INVALID_PATCH_INDEX};
+use crate::common::{Range, INFINITE_DEPTH, INFINITE_NUMBER, INVALID_PATCH_INDEX};
 use crate::common::math::BoundingBox;
 use crate::common::point_set3d::{Color3B, Point3D, PointSet3};
 use crate::decoder::Patch;
@@ -797,16 +797,16 @@ impl PatchSegmenter {
         // let min_num_high_gradient_points = params.min_num_high_gradient_points;
         let enable_point_cloud_partitioning = params.enable_point_cloud_partitioning;
 
-        // let mut roi_bounding_box_min_x = params.roi_bounding_box_min_x.clone();
-        // let mut roi_bounding_box_max_x = params.roi_bounding_box_max_x.clone();
-        // let mut roi_bounding_box_min_y = params.roi_bounding_box_min_y.clone();
-        // let mut roi_bounding_box_max_y = params.roi_bounding_box_max_y.clone();
-        // let mut roi_bounding_box_min_z = params.roi_bounding_box_min_z.clone();
-        // let mut roi_bounding_box_max_z = params.roi_bounding_box_max_z.clone();
-        //
-        // let mut num_cuts_along_1st_longest_axis = params.num_cuts_along_1st_longest_axis;
-        // let mut num_cuts_along_2nd_longest_axis = params.num_cuts_along_2nd_longest_axis;
-        // let mut num_cuts_along_3rd_longest_axis = params.num_cuts_along_3rd_longest_axis;
+        let mut roi_bounding_box_min_x = params.roi_bounding_box_min_x.clone();
+        let mut roi_bounding_box_max_x = params.roi_bounding_box_max_x.clone();
+        let mut roi_bounding_box_min_y = params.roi_bounding_box_min_y.clone();
+        let mut roi_bounding_box_max_y = params.roi_bounding_box_max_y.clone();
+        let mut roi_bounding_box_min_z = params.roi_bounding_box_min_z.clone();
+        let mut roi_bounding_box_max_z = params.roi_bounding_box_max_z.clone();
+
+        let mut num_cuts_along_1st_longest_axis = params.num_cuts_along_1st_longest_axis;
+        let mut num_cuts_along_2nd_longest_axis = params.num_cuts_along_2nd_longest_axis;
+        let mut num_cuts_along_3rd_longest_axis = params.num_cuts_along_3rd_longest_axis;
 
         let point_count = points.point_count();
 
@@ -824,16 +824,16 @@ impl PatchSegmenter {
 
         // Compute adjacency info
         let mut adj: Vec<Vec<usize>> = Vec::new();                     // Adjacency list
-        // let mut adj_dist: Vec<Vec<f64>> = Vec::new();                  // Adjacency distance matrix
-        // let mut flag_exp: Vec<bool> = Vec::new();                      // Flag for expansion (Boolean flags)
-        // let mut num_rois: i32 = 0;                                     // Number of Regions of Interest (ROIs)
-        // let mut num_chunks: i32 = 0;                                   // Number of chunks (or segments)
-        // let mut points_chunks: Vec<PointSet3> = Vec::new();         // Vector of point cloud chunks
-        // let mut points_index_chunks: Vec<Vec<usize>> = Vec::new();     // Vector of point indices for each chunk
-        // let mut point_count_chunks: Vec<usize> = Vec::new();           // Vector of point counts for each chunk
-        // let mut kdtree_chunks: Vec<PCCKdTree> = Vec::new();            // Vector of KD-Trees for each chunk
-        // let mut bounding_box_chunks: Vec<BoundingBox> = Vec::new();       // Vector of bounding boxes for each chunk
-        // let mut adj_chunks: Vec<Vec<Vec<usize>>> = Vec::new();         // Adjacency list for each chunk
+        let mut adj_dist: Vec<Vec<f64>> = Vec::new();                  // Adjacency distance matrix
+        let mut flag_exp: Vec<bool> = Vec::new();                      // Flag for expansion (Boolean flags)
+        let mut num_rois: i32 = 0;                                     // Number of Regions of Interest (ROIs)
+        let mut num_chunks: i32 = 0;                                   // Number of chunks (or segments)
+        let mut points_chunks: Vec<PointSet3> = Vec::new();         // Vector of point cloud chunks
+        let mut points_index_chunks: Vec<Vec<usize>> = Vec::new();     // Vector of point indices for each chunk
+        let mut point_count_chunks: Vec<usize> = Vec::new();           // Vector of point counts for each chunk
+        let mut kdtree_chunks: Vec<PCCKdTree> = Vec::new();            // Vector of KD-Trees for each chunk
+        let mut bounding_box_chunks: Vec<BoundingBox> = Vec::new();       // Vector of bounding boxes for each chunk
+        let mut adj_chunks: Vec<Vec<Vec<usize>>> = Vec::new();         // Adjacency list for each chunk
 
         // ZICO: for now patch_expansion and partitioning is disabled
         // Maybe implement partitioning cause its more memory efficient
@@ -841,7 +841,153 @@ impl PatchSegmenter {
             unimplemented!("Compute Adjacency Info Dist");
         } else {
             if enable_point_cloud_partitioning {
-                unimplemented!("Point Cloud Partitioning");
+                let num_rois = roi_bounding_box_min_x.len();
+
+                // Initialize data structures
+                let mut num_cuts_per_axis = vec![vec![0usize; 3]; num_rois];
+                let mut cut_size_per_axis = vec![vec![0.0; 3]; num_rois];
+
+                // cut_ranges_per_axis[r][x][i]: i-th cut-range of x-th axis of r-th ROI
+                let mut cut_ranges_per_axis = vec![vec![vec![]; 3]; num_rois];
+                let mut chunks = Vec::new();
+
+                // Process each ROI
+                for roi_index in 0..num_rois {
+                    // Derive tight ROI bounding box
+                    let mut x_min = i32::MAX;
+                    let mut x_max = i32::MIN;
+                    let mut y_min = i32::MAX;
+                    let mut y_max = i32::MIN;
+                    let mut z_min = i32::MAX;
+                    let mut z_max = i32::MIN;
+
+                    for i in 0..point_count {
+                        let pos = points.positions[i];
+                        let x = pos[0] as i32;
+                        let y = pos[1] as i32;
+                        let z = pos[2] as i32;
+                        if roi_bounding_box_min_x[roi_index] <= x && x <= roi_bounding_box_max_x[roi_index]
+                            && roi_bounding_box_min_y[roi_index] <= y && y <= roi_bounding_box_max_y[roi_index]
+                            && roi_bounding_box_min_z[roi_index] <= z && z <= roi_bounding_box_max_z[roi_index]
+                        {
+                            x_min = x_min.min(x);
+                            y_min = y_min.min(y);
+                            z_min = z_min.min(z);
+                            x_max = x_max.max(x);
+                            y_max = y_max.max(y);
+                            z_max = z_max.max(z);
+                        }
+                    }
+
+                    // Update bounding box
+                    roi_bounding_box_min_x[roi_index] = x_min;
+                    roi_bounding_box_max_x[roi_index] = x_max;
+                    roi_bounding_box_min_y[roi_index] = y_min;
+                    roi_bounding_box_max_y[roi_index] = y_max;
+                    roi_bounding_box_min_z[roi_index] = z_min;
+                    roi_bounding_box_max_z[roi_index] = z_max;
+
+                    // Sort axes by length of ROI bounding box
+                    let mut delta: Vec<(i32, i32)> = vec![
+                        (0, roi_bounding_box_max_x[roi_index] - roi_bounding_box_min_x[roi_index] + 1),
+                        (1, roi_bounding_box_max_y[roi_index] - roi_bounding_box_min_y[roi_index] + 1),
+                        (2, roi_bounding_box_max_z[roi_index] - roi_bounding_box_min_z[roi_index] + 1),
+                    ];
+
+                    delta.sort_by(|a, b| b.1.cmp(&a.1));
+
+                    println!("\n1st longest axis of ROI {} is: {}", roi_index, delta[0].0);
+                    println!("2nd longest axis of ROI {} is: {}", roi_index, delta[1].0);
+                    println!("3rd longest axis of ROI {} is: {}", roi_index, delta[2].0);
+
+                    // Specify number of cuts per axis
+                    num_cuts_per_axis[roi_index][delta[0].0 as usize] = num_cuts_along_1st_longest_axis as usize;
+                    num_cuts_per_axis[roi_index][delta[1].0 as usize] = num_cuts_along_2nd_longest_axis as usize;
+                    num_cuts_per_axis[roi_index][delta[2].0 as usize] = num_cuts_along_3rd_longest_axis as usize;
+
+                    // Calculate cut sizes
+                    for k in 0..3 {
+                        cut_size_per_axis[roi_index][k] = delta[k].1 as f64 / num_cuts_per_axis[roi_index][k] as f64;
+                    }
+
+                    let shift = vec![
+                        roi_bounding_box_min_x[roi_index],
+                        roi_bounding_box_min_y[roi_index],
+                        roi_bounding_box_min_z[roi_index],
+                    ];
+
+                    // Calculate cut ranges per axis
+                    for axis in 0..3 {
+                        let mut cut_ranges = Vec::new();
+                        for i in 0..num_cuts_per_axis[roi_index][axis] {
+                            let range = (
+                                (i as f64 * cut_size_per_axis[roi_index][axis]).round() as i32 + shift[axis],
+                                ((i as f64 + 1.0) * cut_size_per_axis[roi_index][axis] - 1.0).round() as i32 + shift[axis]
+                            );
+                            cut_ranges.push(range);
+                        }
+                        cut_ranges_per_axis[roi_index][axis] = cut_ranges;
+                    }
+
+                    // Create chunks
+                    for range_x in &cut_ranges_per_axis[roi_index][0] {
+                        for range_y in &cut_ranges_per_axis[roi_index][1] {
+                            for range_z in &cut_ranges_per_axis[roi_index][2] {
+                                chunks.push(vec![range_x.clone(), range_y.clone(), range_z.clone()]);
+                            }
+                        }
+                    }
+                }
+
+                let num_chunks = chunks.len();
+                println!("Total number of chunks: {}", num_chunks);
+
+                let mut points_chunks = vec![PointSet3::default(); num_chunks];
+                let mut points_index_chunks = vec![Vec::new(); num_chunks];
+                let mut point_count_chunks = vec![0; num_chunks];
+                let mut kdtree_chunks = vec![PCCKdTree::new(); num_chunks];
+                let mut bounding_box_chunks = vec![BoundingBox::default(); num_chunks];
+
+                // Assign bounding boxes for each chunk
+                for chunk_index in 0..num_chunks {
+                    let bounding_box = &mut bounding_box_chunks[chunk_index];
+                    bounding_box.min[0] = chunks[chunk_index][0].0 as f64;
+                    bounding_box.max[0] = chunks[chunk_index][0].1 as f64;
+                    bounding_box.min[1] = chunks[chunk_index][1].0 as f64;
+                    bounding_box.max[1] = chunks[chunk_index][1].1 as f64;
+                    bounding_box.min[2] = chunks[chunk_index][2].0 as f64;
+                    bounding_box.max[2] = chunks[chunk_index][2].1 as f64;
+                }
+
+                // Assign points to chunks
+                for i in 0..point_count {
+                    for chunk_index in 0..num_chunks {
+                        if bounding_box_chunks[chunk_index].fully_contains_point(&points.positions[i]) {
+                            points_chunks[chunk_index].add_point(points.positions[i]);
+                            points_index_chunks[chunk_index].push(i);
+                        }
+                    }
+                }
+
+                // Count points in each chunk
+                for chunk_index in 0..num_chunks {
+                    point_count_chunks[chunk_index] = points_chunks[chunk_index].point_count();
+                }
+
+                // Initialize KD-trees for each chunk
+                for chunk_index in 0..num_chunks {
+                    kdtree_chunks[chunk_index].build_from_point_set(&points_chunks[chunk_index]);
+                }
+
+                // Compute adjacency info for each chunk
+                let mut adj_chunks = vec![Vec::new(); num_chunks];
+                for chunk_index in 0..num_chunks {
+                    println!("\n\t Computing adjacency info for chunk {}... ", chunk_index);
+                    adj_chunks[chunk_index] = Self::compute_adjacency_info(
+                        &points_chunks[chunk_index], &kdtree_chunks[chunk_index], max_nn_count
+                    );
+                    println!("[done]");
+                }
             } else {
                 let adj_start = Instant::now();
                 adj = Self::compute_adjacency_info(
