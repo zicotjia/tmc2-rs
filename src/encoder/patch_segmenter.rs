@@ -1078,68 +1078,68 @@ impl PatchSegmenter {
                 patch.occupancy.resize(patch.size_uv0.0 * patch.size_uv0.1, false);
 
                 /// filter depth
-                // let mut peakPerBlock: Vec<i16> = Vec::new();
-                // let peak_number = if patch.projection_mode == 0 { INFINITE_DEPTH } else { 0 };
-                // peakPerBlock.resize(patch.size_uv0.0 * patch.size_uv0.1, peak_number);
-                //
-                // // C++ version iterate through i64 but the patch.size and others use size_t
-                // for v in 0..patch.size_v {
-                //     for u in 0..patch.size_u {
-                //         let p = v * patch.size_u + u;
-                //         let depth0 = patch.depth.0[p];
-                //         if depth0 == INFINITE_DEPTH {
-                //             continue;
-                //         }
-                //
-                //         let u0 = u / patch.occupancy_resolution;
-                //         let v0 = v / patch.occupancy_resolution;
-                //         let p0 = v0 * patch.size_uv0.0 + u0;
-                //
-                //         if patch.projection_mode == 0 {
-                //             peakPerBlock[p0] = peakPerBlock[p0].min(depth0);
-                //         } else {
-                //             peakPerBlock[p0] = peakPerBlock[p0].max(depth0);
-                //         }
-                //     }
-                // }
-                //
-                // // debug!("Do Depth refinement");
-                // // debug!("u: {}, v: {}", patch.size_u, patch.size_v);
-                // for v in 0..patch.size_v  {
-                //     for u in 0..patch.size_u {
-                //         let p = v * patch.size_u + u;
-                //         let depth0 = patch.depth.0[p];
-                //
-                //         if depth0 == INFINITE_DEPTH {
-                //             continue;
-                //         }
-                //
-                //         let u0 = u / patch.occupancy_resolution;
-                //         let v0 = v / patch.occupancy_resolution;
-                //         let p0 = v0 * patch.size_uv0.0 + u0;
-                //
-                //         let tmp_a = (depth0 - peakPerBlock[p0]).abs();
-                //         let tmp_b = surface_thickness as i16 + projection_direction_type * depth0;
-                //         let tmp_c = projection_direction_type * patch.d1 as i16 + max_allowed_depth as i16;
-                //
-                //         // ZICO: This code is problematic all depth is made infinite, is it the tmp calculation?
-                //         // I think we can ignore this for now
-                //         // if depth0 != INFINITE_DEPTH {
-                //         //     if tmp_a > 32 || tmp_b > tmp_c {
-                //         //         patch.depth.0[p] = INFINITE_DEPTH;
-                //         //         patch.depth_0pc_idx[p] = INFINITE_NUMBER;
-                //         //     }
-                //         // }
-                //
-                //
-                //         if depth0 != INFINITE_DEPTH {
-                //             if tmp_a > 32 {
-                //                 patch.depth.0[p] = INFINITE_DEPTH;
-                //                 patch.depth_0pc_idx[p] = INFINITE_NUMBER;
-                //             }
-                //         }
-                //     }
-                // }
+                let mut peakPerBlock: Vec<i16> = Vec::new();
+                let peak_number = if patch.projection_mode == 0 { INFINITE_DEPTH } else { 0 };
+                peakPerBlock.resize(patch.size_uv0.0 * patch.size_uv0.1, peak_number);
+
+                // C++ version iterate through i64 but the patch.size and others use size_t
+                for v in 0..patch.size_v {
+                    for u in 0..patch.size_u {
+                        let p = v * patch.size_u + u;
+                        let depth0 = patch.depth.0[p];
+                        if depth0 == INFINITE_DEPTH {
+                            continue;
+                        }
+
+                        let u0 = u / patch.occupancy_resolution;
+                        let v0 = v / patch.occupancy_resolution;
+                        let p0 = v0 * patch.size_uv0.0 + u0;
+
+                        if patch.projection_mode == 0 {
+                            peakPerBlock[p0] = peakPerBlock[p0].min(depth0);
+                        } else {
+                            peakPerBlock[p0] = peakPerBlock[p0].max(depth0);
+                        }
+                    }
+                }
+
+                // debug!("Do Depth refinement");
+                // debug!("u: {}, v: {}", patch.size_u, patch.size_v);
+                for v in 0..patch.size_v  {
+                    for u in 0..patch.size_u {
+                        let p = v * patch.size_u + u;
+                        let depth0 = patch.depth.0[p];
+
+                        if depth0 == INFINITE_DEPTH {
+                            continue;
+                        }
+
+                        let u0 = u / patch.occupancy_resolution;
+                        let v0 = v / patch.occupancy_resolution;
+                        let p0 = v0 * patch.size_uv0.0 + u0;
+
+                        let tmp_a = (depth0 - peakPerBlock[p0]).abs();
+                        let tmp_b = surface_thickness as i16 + projection_direction_type * depth0;
+                        let tmp_c = projection_direction_type * patch.d1 as i16 + max_allowed_depth as i16;
+
+                        // ZICO: This code is problematic all depth is made infinite, is it the tmp calculation?
+                        // I think we can ignore this for now
+                        // if depth0 != INFINITE_DEPTH {
+                        //     if tmp_a > 32 || tmp_b > tmp_c {
+                        //         patch.depth.0[p] = INFINITE_DEPTH;
+                        //         patch.depth_0pc_idx[p] = INFINITE_NUMBER;
+                        //     }
+                        // }
+
+
+                        if depth0 != INFINITE_DEPTH {
+                            if tmp_a > 32 {
+                                patch.depth.0[p] = INFINITE_DEPTH;
+                                patch.depth_0pc_idx[p] = INFINITE_NUMBER;
+                            }
+                        }
+                    }
+                }
 
                 if eom_single_layer_mode {
                     unimplemented!("eom single layer mode");
