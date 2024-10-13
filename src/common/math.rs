@@ -2,7 +2,7 @@
 
 use std::f64::EPSILON;
 use std::fmt::Debug;
-use cgmath::{InnerSpace, Matrix, Matrix3, Quaternion, Vector3};
+use cgmath::{InnerSpace, Matrix, Matrix3, Quaternion, SquareMatrix, Vector3};
 use cgmath::num_traits::float::FloatCore;
 use serde::{Deserialize, Serialize};
 use vivotk::formats::PointCloud;
@@ -107,62 +107,95 @@ impl Debug for BoundingBox {
 }
 
 // Diagonalize a matrix
-pub(crate) fn diagonalize(a: &Matrix3<f64>) -> (Matrix3<f64>, Matrix3<f64>) {
-    let maxsteps = 24;
-    let mut quat = Quaternion::from_sv(1.0, cgmath::Vector3::new(0.0, 0.0, 0.0)); // Quaternion identity
+pub(crate) fn diagonalize(A: &Matrix3<f64>) -> (Matrix3<f64>, Matrix3<f64>) {
+    const MAX_STEPS: usize = 24;
+    let mut q = Quaternion::new(1.0, 0.0, 0.0, 0.0);
+    let mut Q = Matrix3::from_value(0.0);
+    let mut D = Matrix3::from_value(0.0);
+    let mut AQ: Matrix3<f64>;
+    let mut o = [0.0; 3];
+    let mut m = [0.0; 3];
+    let mut tmp1: f64;
+    let mut tmp2: f64;
 
-    let mut q: Matrix3<f64> = Matrix3::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-    let mut d: Matrix3<f64> = Matrix3::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    for _ in 0..MAX_STEPS {
+        // Convert quaternion to matrix
+        let sqx = q.v.x * q.v.x;
+        let sqy = q.v.y * q.v.y;
+        let sqz = q.v.z * q.v.z;
+        let sqw = q.s * q.s;
 
-    for _ in 0..maxsteps {
-        // Convert quaternion to matrix using cgmath
-        q = Matrix3::from(quat);
+        Q[0][0] = sqx - sqy - sqz + sqw;
+        Q[1][1] = -sqx + sqy - sqz + sqw;
+        Q[2][2] = -sqx - sqy + sqz + sqw;
 
-        // Multiply AQ = A * Q
-        let aq = a * q;
+        tmp1 = q.v.x * q.v.y;
+        tmp2 = q.v.z * q.s;
+        Q[1][0] = 2.0 * (tmp1 + tmp2);
+        Q[0][1] = 2.0 * (tmp1 - tmp2);
+
+        tmp1 = q.v.x * q.v.z;
+        tmp2 = q.v.y * q.s;
+        Q[2][0] = 2.0 * (tmp1 - tmp2);
+        Q[0][2] = 2.0 * (tmp1 + tmp2);
+
+        tmp1 = q.v.y * q.v.z;
+        tmp2 = q.v.x * q.s;
+        Q[2][1] = 2.0 * (tmp1 + tmp2);
+        Q[1][2] = 2.0 * (tmp1 - tmp2);
+
+        // AQ = A * Q
+        AQ = A * Q;
 
         // D = Q.transpose() * AQ
-        d = q.transpose() * aq;
+        D = Q.transpose() * AQ;
 
-        let o = [d[1][2], d[0][2], d[0][1]];
-        let m = [o[0].abs(), o[1].abs(), o[2].abs()];
+        o[0] = D[1][2];
+        o[1] = D[0][2];
+        o[2] = D[0][1];
+        m[0] = o[0].abs();
+        m[1] = o[1].abs();
+        m[2] = o[2].abs();
 
-        // Find the index of the largest element of the off-diagonal
-        let k0 = if m[0] > m[1] && m[0] > m[2] {
-            0
-        } else if m[1] > m[2] {
-            1
-        } else {
-            2
-        };
-
+        let k0 = if m[0] > m[1] && m[0] > m[2] { 0 } else if m[1] > m[2] { 1 } else { 2 };
         let k1 = (k0 + 1) % 3;
         let k2 = (k0 + 2) % 3;
 
-        if o[k0].abs() < EPSILON {
-            break; // diagonal already
-        }
-
-        let theta = (d[k2][k2] - d[k1][k1]) / (2.0 * o[k0]);
-        let sgn = if theta > 0.0 { 1.0 } else { -1.0 };
-        let theta = theta * sgn;
-        let t = sgn / (theta + if theta < 1.0e6 { (theta * theta + 1.0).sqrt() } else { theta });
-        let c = 1.0 / (t * t + 1.0).sqrt();
-
-        if (c - 1.0).abs() < EPSILON {
+        if o[k0] == 0.0 {
             break;
         }
 
-        let mut jr_quat = Quaternion::new(0.0, 0.0, 0.0, 0.0);
-        jr_quat.v[k0] = sgn * ((1.0 - c) / 2.0).sqrt();
-        jr_quat.v[k0] *= -1.0; // account for quaternion convention
-        jr_quat.s = (1.0 - jr_quat.v[k0] * jr_quat.v[k0]).sqrt();
+        let thet = (D[k2][k2] - D[k1][k1]) / (2.0 * o[k0]);
+        let sgn = if thet > 0.0 { 1.0 } else { -1.0 };
+        let thet_abs = thet * sgn;
+        let t = sgn / (thet_abs + if thet_abs < 1.0e6 { (thet_abs * thet_abs + 1.0).sqrt() } else { thet_abs });
+        let c = 1.0 / (t * t + 1.0).sqrt();
 
-        // Update quaternion
-        quat = quat * jr_quat;
-        quat = quat.normalize();
+        if c == 1.0 {
+            break;
+        }
+
+        let mut jr = [0.0; 4];
+        jr[k0] = sgn * ((1.0 - c) / 2.0).sqrt();
+        jr[k0] *= -1.0;
+        jr[3] = (1.0 - jr[k0] * jr[k0]).sqrt();
+
+        if jr[3] == 1.0 {
+            break;
+        }
+
+        q = Quaternion::new(
+            q.s * jr[3] - q.v.x * jr[0] - q.v.y * jr[1] - q.v.z * jr[2],
+            q.s * jr[0] + q.v.x * jr[3] + q.v.y * jr[2] - q.v.z * jr[1],
+            q.s * jr[1] - q.v.x * jr[2] + q.v.y * jr[3] + q.v.z * jr[0],
+            q.s * jr[2] + q.v.x * jr[1] - q.v.y * jr[0] + q.v.z * jr[3],
+        );
+
+        let mq = (q.s * q.s + q.v.x * q.v.x + q.v.y * q.v.y + q.v.z * q.v.z).sqrt();
+        q = q / mq;
     }
-    (q, d)
+
+    (Q, D)
 }
 
 

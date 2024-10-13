@@ -111,7 +111,6 @@ impl NormalsGenerator3 {
         kd_tree: &PCCKdTree,
         params: &NormalsGenerator3Parameters
     )  -> Vector3<f64> {
-        // ZICO: For convenience’s sake, make a copy of the current position but in f64
         let position_vector3d: Vector3D = Vector3D::new(
             point_cloud.positions[index][0] as f64,
             point_cloud.positions[index][1] as f64,

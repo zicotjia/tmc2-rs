@@ -314,7 +314,7 @@ impl PatchSegmenter {
         distance_src_rec: &mut f32
     ) {
         // Determine Orientation
-        // ZICO: For now assume only the base 6 projection plane
+        // ZICO: For now assume only 6 projection planes
         let orientations = orientations6;
         let orientations_count = orientations6Count;
         let mut geometry_vox;
@@ -351,8 +351,7 @@ impl PatchSegmenter {
                 store_number_of_nearest_neighbors_in_normal_estimation: false,
                 store_centroids: false,
             };
-            let normal_generator = NormalsGenerator3::init(geometry_vox.point_count(), &normal_gen_params);
-            let normals = normal_generator.compute_normals(&geometry_vox, &kd_tree, &normal_gen_params);
+            let normals = NormalsGenerator3::compute(&geometry_vox, &kd_tree, &normal_gen_params);
             geometry_vox.add_normals(normals);
         }
         println!("Done");
@@ -368,7 +367,6 @@ impl PatchSegmenter {
         }
         println!("Done");
 
-        // ZICO: For now lets skip all segmentation refinement
         if params.grid_based_refine_segmentation {
             println!("Refining segmentation (Grid-Based)");
             Self::refine_segmentation_grid_based(
@@ -527,14 +525,6 @@ impl PatchSegmenter {
                     *part = cluster_index;
             });
         }
-
-        // let mut m: HashMap<i32, usize> = HashMap::new();
-        // for i in &partition {
-        //     *m.entry(*i as i32).or_default() += 1;
-        // }
-        // for i in m.into_iter() {
-        //     println!("Freq of {} is {}", i.0, i.1);
-        // }
 
         // ZICO: Can be made functional
         #[cfg(not(feature = "use_rayon"))]
@@ -776,13 +766,20 @@ impl PatchSegmenter {
         let point_count = points.point_count();
         let weight = lambda / max_nn_count as f64;
         let mut temp_partition: Vec<usize> = vec![0; point_count];
+        let mut temp_scores_smooth: Vec<Vec<usize>> = vec![vec![0; orientations_count]; point_count];
 
-        #[cfg(feature = "use_rayon")]
-        {
-            use rayon::prelude::*;
+        for _k in 0..iteration_count {
+            // Reset scoresSmooth (like in C++)
+            for score_smooth in temp_scores_smooth.iter_mut() {
+                score_smooth.fill(0);
+            }
 
-            for _k in 0..iteration_count {
-                let temp_scores_smooth: Vec<Vec<usize>> = (0..point_count)
+            #[cfg(feature = "use_rayon")]
+            {
+                use rayon::prelude::*;
+
+                // Parallel processing to accumulate scores locally first
+                let local_scores_smooth: Vec<Vec<usize>> = (0..point_count)
                     .into_par_iter()
                     .map(|i| {
                         let mut score_smooth = vec![0; orientations_count];
@@ -793,17 +790,23 @@ impl PatchSegmenter {
                     })
                     .collect();
 
+                // Update `temp_scores_smooth` after local accumulation
+                for i in 0..point_count {
+                    temp_scores_smooth[i] = local_scores_smooth[i].clone();
+                }
+
+                // Update temp_partition with the best cluster index based on normal and smooth scores
                 temp_partition
                     .par_iter_mut()
                     .enumerate()
                     .for_each(|(i, cluster_index)| {
                         let normal = points.normals[i];
                         let mut best_cluster_index = *cluster_index;
-                        let mut best_score = 0.0;
-                        let score_smooth = &temp_scores_smooth[i]; // Immutable access
+                        let mut best_score = f64::MIN; // Ensure best_score handles negative values
+                        let score_smooth = &temp_scores_smooth[i]; // Access immutable reference to smooth scores for this point
 
                         for j in 0..orientations_count {
-                            let score_normal = normal.dot(orientations[j]); // assuming dot product method
+                            let score_normal = normal.dot(orientations[j]); // Assuming a dot product method
                             let score = score_normal + weight * score_smooth[j] as f64;
 
                             if score > best_score {
@@ -814,54 +817,48 @@ impl PatchSegmenter {
 
                         *cluster_index = best_cluster_index;
                     });
-
-                // 3. Swap partitions
-                std::mem::swap(partition, &mut temp_partition);
             }
-        }
-        
-        #[cfg(not(feature = "use_rayon"))]
-        {
-            let mut scores_smooth: Vec<Vec<usize>> = vec![vec![0; orientations_count]; point_count];
-            for _k in 0..iteration_count {
-                // Sequential section to process scoresSmooth
+
+            #[cfg(not(feature = "use_rayon"))]
+            {
+                // Non-parallel version of the score accumulation
                 for i in 0..point_count {
-                    let score_smooth = &mut scores_smooth[i];
-                    score_smooth.fill(0);
+                    let score_smooth = &mut temp_scores_smooth[i];
                     for &neighbor in &adj[i] {
                         score_smooth[partition[neighbor]] += 1;
                     }
                 }
 
-                // Sequential section to update partition based on normals and scores
+                // Non-parallel version of the partition update
                 for i in 0..point_count {
                     let normal = points.normals[i];
-                    let mut cluster_index = partition[i];
-                    let mut best_score = 0.0;
-                    let score_smooth = &scores_smooth[i];
+                    let mut best_cluster_index = partition[i];
+                    let mut best_score = f64::MIN; // Ensure best_score handles negative values
+                    let score_smooth = &temp_scores_smooth[i];
 
                     for j in 0..orientations_count {
-                        let score_normal = normal.dot(orientations[j]); // assuming dot product method
+                        let score_normal = normal.dot(orientations[j]); // Assuming a dot product method
                         let score = score_normal + weight * score_smooth[j] as f64;
 
                         if score > best_score {
                             best_score = score;
-                            cluster_index = j;
+                            best_cluster_index = j;
                         }
                     }
 
-                    temp_partition[i] = cluster_index;
+                    temp_partition[i] = best_cluster_index;
                 }
-
-                // Swap partitions
-                std::mem::swap(partition, &mut temp_partition);
             }
 
-            // Clear scoresSmooth vectors
-            for vector in &mut scores_smooth {
-                vector.clear();
-            }
+            // Swap partitions
+            std::mem::swap(partition, &mut temp_partition);
         }
+
+        // Clear temp_scores_smooth like in the C++ version
+        for score_smooth in temp_scores_smooth.iter_mut() {
+            score_smooth.clear();
+        }
+        temp_scores_smooth.clear();
     }
 
     pub fn segment_patches(
@@ -927,7 +924,6 @@ impl PatchSegmenter {
         assert!(&points.with_colors);
         // Add colors
         points.colors.iter().for_each(|color| frame_pcc_color.push(color.clone()));
-
 
         let mut num_d0_points = 0;
         let mut num_d1_points = 0;
@@ -1350,8 +1346,8 @@ impl PatchSegmenter {
                 let normal_axis = patch.axes.0 as usize;
                 let tangent_axis = patch.axes.1 as usize;
                 let bitangent_axis = patch.axes.2 as usize;
-                patch.size_u = 1 + (bounding_box.max[tangent_axis].ceil() - bounding_box.min[tangent_axis].floor()) as usize;
-                patch.size_v = 1 + (bounding_box.max[bitangent_axis].ceil() - bounding_box.min[bitangent_axis].floor()) as usize;
+                patch.size_u = 1 + (bounding_box.max[tangent_axis].round() - bounding_box.min[tangent_axis].floor()) as usize;
+                patch.size_v = 1 + (bounding_box.max[bitangent_axis].round() - bounding_box.min[bitangent_axis].floor()) as usize;
                 patch.uv1.0 = bounding_box.min[tangent_axis] as usize;
                 patch.uv1.1 = bounding_box.min[bitangent_axis] as usize;
                 patch.d1 = if patch.projection_mode == 0 { INFINITE_DEPTH as usize } else { 0 };

@@ -1,17 +1,12 @@
 use std::fs;
 use std::time::Instant;
-use cgmath::Vector3;
 use env_logger::Env;
 use vivotk::formats::PointCloud;
 use vivotk::formats::pointxyzrgba::PointXyzRgba;
 use vivotk::pcd::{read_pcd_file, read_pcd_header};
-use tmc2rs::common;
 use tmc2rs::common::point_set3d::{Point3D, PointSet3};
-use tmc2rs::encoder::constants::orientations::{orientations6, orientations6Count};
 use tmc2rs::encoder::kd_tree::PCCKdTree;
-use tmc2rs::encoder::normals_generator::{NormalsGenerator3, NormalsGenerator3Parameters, NormalsGeneratorOrientation};
 use tmc2rs::encoder::patch_segmenter::{PatchSegmenter, PatchSegmenterParams};
-use tmc2rs::encoder::Vector3D;
 
 // For quick testing
 fn main() {
@@ -47,7 +42,7 @@ fn test_patch_segmenter() {
     kd_tree.build_from_point_set(&point_cloud);
     let duration = start.elapsed(); // Stop timing
     println!("Time taken to build kd tree : {:?}", duration);
-    let patch_segmenter_params = PatchSegmenterParams::new();
+    let patch_segmenter_params = PatchSegmenterParams::new_grid_based();
     // let patch_segmenter_params = PatchSegmenterParams::new();
 
     let start = Instant::now(); // Start timing

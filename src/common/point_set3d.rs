@@ -35,7 +35,7 @@ impl From<Vec<vivotk::formats::pointxyzrgba::PointXyzRgba>> for PointSet3 {
         let (positions, colors): (Vec<Point3D>, Vec<Color3B>) = value
             .into_iter()
             .map(|point| (
-                Point3D {x : point.x as i16, y: point.y as i16, z: point.z as i16},
+                Point3D {x: point.x as i16, y: point.y as i16, z: point.z as i16},
                 Color3B {x: point.r, y: point.g, z: point.b})
             ).unzip();
         PointSet3 { positions, colors, colors16bit: vec![], point_patch_indexes: vec![], normals: vec![], with_normals: false, with_colors: true }
