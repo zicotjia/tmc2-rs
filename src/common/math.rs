@@ -36,12 +36,14 @@ impl BoundingBox {
         self.max.y = self.max.y.max(point.y);
         self.max.z = self.max.z.max(point.z);
     }
-    pub fn intersects(&self, other: BoundingBox) -> bool {
+    pub fn intersects(&self, other: &BoundingBox) -> bool {
         unimplemented!("Box intersection not implemented")
     }
 
-    pub fn fully_contains_box(&self, other: BoundingBox) -> bool {
-        unimplemented!("Box contains box not implemented")
+    pub fn fully_contains_box(&self, other: &BoundingBox) -> bool {
+        self.max.x >= other.max.x && self.min.x <= other.min.x
+            && self.max.y >= other.max.y && self.min.y <= other.min.y
+            && self.max.z >= other.max.z && self.min.z <= other.min.z
     }
 
     pub fn fully_contains_point(&self, point: &Vector3<i16>) -> bool {

@@ -1,5 +1,5 @@
 use std::cmp::{min, PartialEq};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::c_double;
 use std::time::Instant;
 use cgmath::{InnerSpace, Vector3};
@@ -100,7 +100,7 @@ impl PatchSegmenterParams {
             min_level: 64,
             max_allowed_depth: 0,
             max_allowed_dist_2_raw_points_detection: 9.0,
-            max_allowed_dist_2_raw_points_selection: 9.0,
+            max_allowed_dist_2_raw_points_selection: 1.0,
             lambda_refine_segmentation: 3.0,
             use_enhanced_occupancy_map_code: false,
             absolute_d1: false,
@@ -154,7 +154,7 @@ impl PatchSegmenterParams {
             min_level: 64,
             max_allowed_depth: 0,
             max_allowed_dist_2_raw_points_detection: 9.0,
-            max_allowed_dist_2_raw_points_selection: 9.0,
+            max_allowed_dist_2_raw_points_selection: 1.0,
             lambda_refine_segmentation: 3.0,
             use_enhanced_occupancy_map_code: false,
             absolute_d1: false,
@@ -181,6 +181,116 @@ impl PatchSegmenterParams {
             num_cuts_along_1st_longest_axis: 0,
             num_cuts_along_2nd_longest_axis: 0,
             num_cuts_along_3rd_longest_axis: 0,
+        }
+    }
+
+    pub fn new_grid_based_with_point_cloud_partitioning() -> Self {
+        PatchSegmenterParams {
+            grid_based_segmentation: true,
+            voxel_dimension_grid_based_segmentation: 2,
+            nn_normal_estimation: 16,
+            normal_orientation: 1,
+            grid_based_refine_segmentation: true,
+            max_nn_count_refine_segmentation: 384,
+            iteration_count_refine_segmentation: 5,
+            voxel_dimension_refine_segmentation: 2,
+            search_radius_refine_segmentation: 128,
+            occupancy_resolution: 1,
+            enable_patch_splitting: false,
+            max_patch_size: 1024,
+            quantizer_size_x: 1 << 4,
+            quantizer_size_y: 1 << 4,
+            min_point_count_per_cc_patch_segmentation: 16,
+            max_nn_count_patch_segmentation: 16,
+            surface_thickness: 4,
+            eom_fix_bit_count: 0,
+            eom_single_layer_mode: false,
+            map_count_minus_1: 1,
+            min_level: 64,
+            max_allowed_depth: 0,
+            max_allowed_dist_2_raw_points_detection: 9.0,
+            max_allowed_dist_2_raw_points_selection: 1.0,
+            lambda_refine_segmentation: 3.0,
+            use_enhanced_occupancy_map_code: false,
+            absolute_d1: false,
+            create_sub_point_cloud: false,
+            surface_separation: false,
+            weight_normal: Vector3 { x: 1.0, y: 1.0, z: 1.0 },
+            additional_projection_plane_mode: 0,
+            partial_additional_projection_plane: 0.0,
+            geometry_bit_depth_2d: 8,
+            geometry_bit_depth_3d: 10,
+            patch_expansion: false,
+            high_gradient_separation: false,
+            min_gradient: 15.0,
+            min_num_high_gradient_points: 256,
+            enable_point_cloud_partitioning: true,
+            roi_bounding_box_min_x: vec![0, 0, 0, 0],
+            roi_bounding_box_max_x: vec![1023, 1023, 1023, 1023],
+            roi_bounding_box_min_y: vec![0, 256, 512, 768],
+            roi_bounding_box_max_y: vec![255, 511, 767, 1023],
+            roi_bounding_box_min_z: vec![0, 0, 0, 0],
+            roi_bounding_box_max_z: vec![1023, 1023, 1023, 1023],
+            num_tiles_hor: 2,
+            tile_height_to_width_ratio: 1.0,
+            num_cuts_along_1st_longest_axis: 2,
+            num_cuts_along_2nd_longest_axis: 1,
+            num_cuts_along_3rd_longest_axis: 1,
+        }
+    }
+
+    pub fn new_point_cloud_partitioning() -> Self {
+        PatchSegmenterParams {
+            grid_based_segmentation: false,
+            voxel_dimension_grid_based_segmentation: 2,
+            nn_normal_estimation: 16,
+            normal_orientation: 1,
+            grid_based_refine_segmentation: false,
+            max_nn_count_refine_segmentation: 256,
+            iteration_count_refine_segmentation: 100,
+            voxel_dimension_refine_segmentation: 4,
+            search_radius_refine_segmentation: 192,
+            occupancy_resolution: 16,
+            enable_patch_splitting: false,
+            max_patch_size: 1024,
+            quantizer_size_x: 1 << 4,
+            quantizer_size_y: 1 << 4,
+            min_point_count_per_cc_patch_segmentation: 16,
+            max_nn_count_patch_segmentation: 16,
+            surface_thickness: 4,
+            eom_fix_bit_count: 0,
+            eom_single_layer_mode: false,
+            map_count_minus_1: 1,
+            min_level: 64,
+            max_allowed_depth: 0,
+            max_allowed_dist_2_raw_points_detection: 9.0,
+            max_allowed_dist_2_raw_points_selection: 1.0,
+            lambda_refine_segmentation: 3.0,
+            use_enhanced_occupancy_map_code: false,
+            absolute_d1: false,
+            create_sub_point_cloud: false,
+            surface_separation: false,
+            weight_normal: Vector3 { x: 1.0, y: 1.0, z: 1.0 },
+            additional_projection_plane_mode: 0,
+            partial_additional_projection_plane: 0.0,
+            geometry_bit_depth_2d: 8,
+            geometry_bit_depth_3d: 10,
+            patch_expansion: false,
+            high_gradient_separation: false,
+            min_gradient: 15.0,
+            min_num_high_gradient_points: 256,
+            enable_point_cloud_partitioning: true,
+            roi_bounding_box_min_x: vec![0, 0, 0, 0],
+            roi_bounding_box_max_x: vec![1023, 1023, 1023, 1023],
+            roi_bounding_box_min_y: vec![0, 256, 512, 768],
+            roi_bounding_box_max_y: vec![255, 511, 767, 1023],
+            roi_bounding_box_min_z: vec![0, 0, 0, 0],
+            roi_bounding_box_max_z: vec![1023, 1023, 1023, 1023],
+            num_tiles_hor: 2,
+            tile_height_to_width_ratio: 1.0,
+            num_cuts_along_1st_longest_axis: 2,
+            num_cuts_along_2nd_longest_axis: 1,
+            num_cuts_along_3rd_longest_axis: 1,
         }
     }
 }
@@ -236,7 +346,7 @@ impl PatchSegmenter {
                 number_of_nearest_neighbors_in_normal_estimation: params.nn_normal_estimation,
                 number_of_nearest_neighbors_in_normal_orientation: params.nn_normal_estimation,
                 number_of_iterations_in_normal_smoothing: 0,
-                orientation_strategy: NormalsGeneratorOrientation::PCC_NORMALS_GENERATOR_ORIENTATION_NONE,// params.nn_normal_estimation
+                orientation_strategy: NormalsGeneratorOrientation::PCC_NORMALS_GENERATOR_ORIENTATION_SPANNING_TREE,// params.nn_normal_estimation
                 store_eigenvalues: false,
                 store_number_of_nearest_neighbors_in_normal_estimation: false,
                 store_centroids: false,
@@ -501,9 +611,9 @@ impl PatchSegmenter {
 
         for i in 0..point_count {
             let pos = &points.positions[i];
-            let x0 = ((pos[0] as usize + vox_dim_half) >> vox_dim_shift);
-            let y0 = ((pos[1] as usize + vox_dim_half) >> vox_dim_shift);
-            let z0 = ((pos[2] as usize + vox_dim_half) >> vox_dim_shift);
+            let x0 = (pos[0] as usize + vox_dim_half) >> vox_dim_shift;
+            let y0 = (pos[1] as usize + vox_dim_half) >> vox_dim_shift;
+            let z0 = (pos[2] as usize + vox_dim_half) >> vox_dim_shift;
 
             let p = sub_to_ind(x0, y0, z0);
 
@@ -824,10 +934,10 @@ impl PatchSegmenter {
 
         // Compute adjacency info
         let mut adj: Vec<Vec<usize>> = Vec::new();                     // Adjacency list
-        let mut adj_dist: Vec<Vec<f64>> = Vec::new();                  // Adjacency distance matrix
-        let mut flag_exp: Vec<bool> = Vec::new();                      // Flag for expansion (Boolean flags)
+        // let mut adj_dist: Vec<Vec<f64>> = Vec::new();                  // Adjacency distance matrix
+        // let mut flag_exp: Vec<bool> = Vec::new();                      // Flag for expansion (Boolean flags)
         let mut num_rois: i32 = 0;                                     // Number of Regions of Interest (ROIs)
-        let mut num_chunks: i32 = 0;                                   // Number of chunks (or segments)
+        let mut num_chunks: usize = 0;                                   // Number of chunks (or segments)
         let mut points_chunks: Vec<PointSet3> = Vec::new();         // Vector of point cloud chunks
         let mut points_index_chunks: Vec<Vec<usize>> = Vec::new();     // Vector of point indices for each chunk
         let mut point_count_chunks: Vec<usize> = Vec::new();           // Vector of point counts for each chunk
@@ -939,14 +1049,14 @@ impl PatchSegmenter {
                     }
                 }
 
-                let num_chunks = chunks.len();
+                num_chunks = chunks.len();
                 println!("Total number of chunks: {}", num_chunks);
 
-                let mut points_chunks = vec![PointSet3::default(); num_chunks];
-                let mut points_index_chunks = vec![Vec::new(); num_chunks];
-                let mut point_count_chunks = vec![0; num_chunks];
-                let mut kdtree_chunks = vec![PCCKdTree::new(); num_chunks];
-                let mut bounding_box_chunks = vec![BoundingBox::default(); num_chunks];
+                points_chunks = vec![PointSet3::default(); num_chunks];
+                points_index_chunks = vec![Vec::new(); num_chunks];
+                point_count_chunks = vec![0; num_chunks];
+                kdtree_chunks = vec![PCCKdTree::new(); num_chunks];
+                bounding_box_chunks = vec![BoundingBox::default(); num_chunks];
 
                 // Assign bounding boxes for each chunk
                 for chunk_index in 0..num_chunks {
@@ -980,7 +1090,7 @@ impl PatchSegmenter {
                 }
 
                 // Compute adjacency info for each chunk
-                let mut adj_chunks = vec![Vec::new(); num_chunks];
+                adj_chunks = vec![Vec::new(); num_chunks];
                 for chunk_index in 0..num_chunks {
                     println!("\n\t Computing adjacency info for chunk {}... ", chunk_index);
                     adj_chunks[chunk_index] = Self::compute_adjacency_info(
@@ -1003,14 +1113,24 @@ impl PatchSegmenter {
         let mut raw_points_distance: Vec<f64> = vec![f64::MAX; point_count];
         raw_points = (0..point_count).collect();
 
-        // let raw_points_chunks: Vec<Vec<usize>>;
-        // let raw_points_distance_chunks: Vec<Vec<f64>>;
+        let mut raw_points_chunks: Vec<Vec<usize>> = vec![];
+        let mut raw_points_distance_chunks: Vec<Vec<f64>> = vec![];
         if enable_point_cloud_partitioning {
-            unimplemented!("implement point cloud partitioning")
+            raw_points_chunks.resize(num_chunks, vec![]);
+            raw_points_distance_chunks.resize(num_chunks, vec![]);
+            for index in 0..num_chunks {
+                raw_points_chunks[index].resize(point_count_chunks[index], 0);
+                raw_points_distance_chunks[index].resize(point_count_chunks[index], 0.0);
+            }
+            for chunk_index in 0..num_chunks {
+                for index in 0..point_count_chunks[chunk_index] {
+                    raw_points_chunks[chunk_index][index] = index;
+                    raw_points_distance_chunks[chunk_index][index] = f64::MAX;
+                }
+            }
         }
 
         sub_point_cloud.clear();
-        // ZICO: What is A, B here?
         let mut mean_pab: f64 = 0.0;
         let mut mean_yab: f64 = 0.0;
         let mut mean_uab: f64 = 0.0;
@@ -1084,7 +1204,69 @@ impl PatchSegmenter {
                     }
                 }
             } else {
-                unimplemented!("cloud partitioning")
+                let mut connected_components_chunks: Vec<Vec<Vec<usize>>> = vec![Vec::new(); num_chunks];
+
+                for chunk_index in 0..num_chunks {
+                    println!("\n\t Extracting connected components of chunk {}... ", chunk_index);
+
+                    let mut fifo = Vec::with_capacity(point_count_chunks[chunk_index]);
+                    let mut flags = vec![false; point_count_chunks[chunk_index]];
+                    for &i in &raw_points_chunks[chunk_index] {
+                        flags[i] = true;
+                    }
+                    connected_components_chunks[chunk_index].reserve(256);
+
+                    for &i in &raw_points_chunks[chunk_index] {
+                        if flags[i] && raw_points_distance_chunks[chunk_index][i] > max_allowed_dist2_raw_points_detection {
+                            flags[i] = false;
+                            let index_cc = connected_components_chunks[chunk_index].len();
+                            let cluster_index = partition[points_index_chunks[chunk_index][i]];
+                            connected_components_chunks[chunk_index].push(vec![]);
+
+                            let connected_component_chunk = &mut connected_components_chunks[chunk_index][index_cc];
+                            fifo.push(i);
+                            connected_component_chunk.push(i);
+
+                            // BFS
+                            while let Some(current) = fifo.pop() {
+                                for &n in &adj_chunks[chunk_index][current] {
+                                    if cluster_index == partition[points_index_chunks[chunk_index][n]] && flags[n] {
+                                        flags[n] = false;
+                                        fifo.push(n);
+                                        connected_component_chunk.push(n);
+                                    }
+                                }
+                            }
+
+                            if connected_component_chunk.len() < min_point_count_per_cc {
+                                connected_components_chunks[chunk_index].pop();
+                            } else {
+                                println!("\t\t CC {} -> {}", index_cc, connected_component_chunk.len());
+                            }
+                        }
+                    }
+
+                    println!("[done]");
+                }
+
+                println!("\n\t merge connected components of all chunks... ");
+                // Convert connected component indexes of chunks to original indexes
+                for chunk_index in 0..num_chunks {
+                    for connected_component in &mut connected_components_chunks[chunk_index] {
+                        for i in connected_component.iter_mut() {
+                            *i = points_index_chunks[chunk_index][*i];
+                        }
+                    }
+                }
+                connected_components.clear();
+                for chunk_index in 0..num_chunks {
+                    println!("\n\t number of connected components in {} = {}", chunk_index, connected_components_chunks[chunk_index].len());
+                    for connected_component in connected_components_chunks[chunk_index].drain(..) {
+                        connected_components.push(connected_component);
+                    }
+                }
+                println!("\n\t number of merged connected components = {}", connected_components.len());
+                println!("done");
             }
             let cc_duration = cc_start.elapsed();
             // debug!("Time taken to create connected components: {:?}", cc_duration);
@@ -1153,7 +1335,17 @@ impl PatchSegmenter {
                 }
 
                 if enable_point_cloud_partitioning {
-                    unimplemented!("Enable Point Cloud Partitioning")
+                    for index in 0..(num_rois as usize) {
+                        let mut roi_bounding_box = BoundingBox::default();
+                        roi_bounding_box.min[0] = roi_bounding_box_min_x[index].into();
+                        roi_bounding_box.max[0] = roi_bounding_box_max_x[index].into();
+                        roi_bounding_box.min[1] = roi_bounding_box_min_y[index].into();
+                        roi_bounding_box.max[1] = roi_bounding_box_max_y[index].into();
+                        roi_bounding_box.min[2] = roi_bounding_box_min_z[index].into();
+                        roi_bounding_box.max[2] = roi_bounding_box_max_z[index].into();
+                        // Place the connected components into a partition
+                        if roi_bounding_box.fully_contains_box(&bounding_box) { patch.roi_index = index}
+                    }
                 }
                 let normal_axis = patch.axes.0 as usize;
                 let tangent_axis = patch.axes.1 as usize;
@@ -1415,7 +1607,19 @@ impl PatchSegmenter {
             debug!("Time taken to generate patch: {:?}", patch_duration);
 
             if enable_point_cloud_partitioning {
-                unimplemented!("Point Cloud Partitioning")
+                // update rawPointsChunks using rawPoints
+                let raw_points_set: HashSet<usize> = raw_points.iter().cloned().collect();
+                let mut raw_points_chunks_next_iter: Vec<Vec<usize>> = vec![Vec::new(); num_chunks];
+                for chunk_index in 0..num_chunks {
+                    for &i in &raw_points_chunks[chunk_index] {
+                        if raw_points_set.contains(&points_index_chunks[chunk_index][i]) {
+                            raw_points_chunks_next_iter[chunk_index].push(i);
+                            raw_points_distance_chunks[chunk_index][i] = raw_points_distance[points_index_chunks[chunk_index][i]];
+                        }
+                    }
+                }
+                // Update the current chunk
+                raw_points_chunks = raw_points_chunks_next_iter;
             }
             println!(" # patches {}", patches.len());
             println!(" # resampled {}", resampled.point_count());

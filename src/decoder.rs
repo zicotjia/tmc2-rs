@@ -826,8 +826,8 @@ pub(crate) struct Patch {
     // ZICO: Why do we eom_count then eom_and_d1_count?
     pub(crate) eom_and_d1_count: usize,
     pub(crate) patch_type: PatchModePTile,
-    // is_roi_patch: bool,
-    // roi_index: usize,
+    pub(crate) is_roi_patch: bool,
+    pub(crate) roi_index: usize,
     // /// patch index
     // index_copy: usize,
     // bounding_box: Int16Box3D,
