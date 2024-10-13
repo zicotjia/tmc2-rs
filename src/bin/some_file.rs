@@ -42,7 +42,7 @@ fn test_patch_segmenter() {
     kd_tree.build_from_point_set(&point_cloud);
     let duration = start.elapsed(); // Stop timing
     println!("Time taken to build kd tree : {:?}", duration);
-    let patch_segmenter_params = PatchSegmenterParams::new_grid_based();
+    let patch_segmenter_params = PatchSegmenterParams::new_grid_based_with_point_cloud_partitioning();
     // let patch_segmenter_params = PatchSegmenterParams::new();
 
     let start = Instant::now(); // Start timing

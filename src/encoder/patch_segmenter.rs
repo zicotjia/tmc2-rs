@@ -98,7 +98,7 @@ impl PatchSegmenterParams {
             eom_single_layer_mode: false,
             map_count_minus_1: 1,
             min_level: 64,
-            max_allowed_depth: 0,
+            max_allowed_depth: 255, // (1 << geometry_nominal_2d_bitdepth(8)) - 1
             max_allowed_dist_2_raw_points_detection: 9.0,
             max_allowed_dist_2_raw_points_selection: 1.0,
             lambda_refine_segmentation: 3.0,
@@ -152,7 +152,7 @@ impl PatchSegmenterParams {
             eom_single_layer_mode: false,
             map_count_minus_1: 1,
             min_level: 64,
-            max_allowed_depth: 0,
+            max_allowed_depth: 255,
             max_allowed_dist_2_raw_points_detection: 9.0,
             max_allowed_dist_2_raw_points_selection: 1.0,
             lambda_refine_segmentation: 3.0,
@@ -207,7 +207,7 @@ impl PatchSegmenterParams {
             eom_single_layer_mode: false,
             map_count_minus_1: 1,
             min_level: 64,
-            max_allowed_depth: 0,
+            max_allowed_depth: 255,
             max_allowed_dist_2_raw_points_detection: 9.0,
             max_allowed_dist_2_raw_points_selection: 1.0,
             lambda_refine_segmentation: 3.0,
@@ -262,7 +262,7 @@ impl PatchSegmenterParams {
             eom_single_layer_mode: false,
             map_count_minus_1: 1,
             min_level: 64,
-            max_allowed_depth: 0,
+            max_allowed_depth: 255,
             max_allowed_dist_2_raw_points_detection: 9.0,
             max_allowed_dist_2_raw_points_selection: 1.0,
             lambda_refine_segmentation: 3.0,
@@ -1105,6 +1105,7 @@ impl PatchSegmenter {
                 debug!("Time taken to compute adj info: {:?}", adj_duration)
             }
         }
+        println!("\n\t Extracting Patches");
         // Extract Patches
         let mut raw_points_distance: Vec<f64> = vec![f64::MAX; point_count];
         raw_points = (0..point_count).collect();
@@ -1125,6 +1126,7 @@ impl PatchSegmenter {
                 }
             }
         }
+        println!("[done]");
 
         sub_point_cloud.clear();
         let mut mean_pab: f64 = 0.0;
@@ -1165,7 +1167,6 @@ impl PatchSegmenter {
 
                 connected_components.reserve(256);
 
-                // ZICO: Must we go through all points for each connected components?
                 println!("num raw points: {}", raw_points.len());
                 for index in &raw_points {
                     let index = *index;
@@ -1287,7 +1288,7 @@ impl PatchSegmenter {
                 let mut eom_count_per_patch: usize = 0;
                 patch.set_index(patch_index);
 
-                // ZICO: Skip EOM field, let's minimally update Patch struct
+                // ZICO: Skip EOM field
                 let cluster_index = partition[connected_component[0]];
                 let is_additional_projection_plane = cluster_index > 5;
 
@@ -1295,8 +1296,8 @@ impl PatchSegmenter {
                 patch.set_view_id(cluster_index as u8);
                 patch.set_best_match_idx(INVALID_PATCH_INDEX);
 
-                patch.cur_gpa_patch_data.initialize();
                 patch.pre_gpa_patch_data.initialize();
+                patch.cur_gpa_patch_data.initialize();
 
                 if params.enable_patch_splitting {
                     unimplemented!("patch splitting")
@@ -1312,12 +1313,11 @@ impl PatchSegmenter {
 
                 // ZICO: Maybe make this default
                 for i in 0..=2 {
+                    bounding_box.min[i] = f64::MAX;
                     bounding_box.max[i] = 0.0;
                 }
 
                 for &index in connected_component.iter() {
-                    // patch_partition map point index to the patch it belongs to
-                    // Why patch_index + 1? for 1-indexing?
                     patch_partition[index] = patch_index + 1;
                     if is_additional_projection_plane {
                         unimplemented!("Additional Projection Plane");
@@ -1367,15 +1367,13 @@ impl PatchSegmenter {
                         unimplemented!("Additional Projection Plane")
                     }
                     let point = points.positions[i];
-                    // C++ version round down, but the values are all int
-                    let d = point[normal_axis] as i16;
+                    let d = point[normal_axis];
                     let u = point[tangent_axis] as usize - patch.uv1.0 ;
                     let v = point[bitangent_axis] as usize - patch.uv1.1;
                     assert!(u >= 0 && u < patch.size_u);
                     assert!(v >= 0 && v < patch.size_v);
                     let p = v * patch.size_u + u;
-                    let is_valid_point = if patch.projection_mode == 0 { patch.depth.0[p] > d }
-                    else { patch.depth.0[p] == INFINITE_DEPTH || patch.depth.0[p] < d};
+                    let is_valid_point = if patch.projection_mode == 0 { patch.depth.0[p] > d } else { patch.depth.0[p] == INFINITE_DEPTH || patch.depth.0[p] < d};
 
                     /// Fill Depth 0
                     if is_valid_point {
@@ -1436,9 +1434,6 @@ impl PatchSegmenter {
                         }
                     }
                 }
-
-                // debug!("Do Depth refinement");
-                // debug!("u: {}, v: {}", patch.size_u, patch.size_v);
                 for v in 0..patch.size_v  {
                     for u in 0..patch.size_u {
                         let p = v * patch.size_u + u;
@@ -1456,18 +1451,9 @@ impl PatchSegmenter {
                         let tmp_b = surface_thickness as i16 + projection_direction_type * depth0;
                         let tmp_c = projection_direction_type * patch.d1 as i16 + max_allowed_depth as i16;
 
-                        // ZICO: This code is problematic all depth is made infinite, is it the tmp calculation?
-                        // I think we can ignore this for now
-                        // if depth0 != INFINITE_DEPTH {
-                        //     if tmp_a > 32 || tmp_b > tmp_c {
-                        //         patch.depth.0[p] = INFINITE_DEPTH;
-                        //         patch.depth_0pc_idx[p] = INFINITE_NUMBER;
-                        //     }
-                        // }
-
-
+                        // ZICO: Fixed, Bless
                         if depth0 != INFINITE_DEPTH {
-                            if tmp_a > 32 {
+                            if tmp_a > 32 || tmp_b > tmp_c {
                                 patch.depth.0[p] = INFINITE_DEPTH;
                                 patch.depth_0pc_idx[p] = INFINITE_NUMBER;
                             }
