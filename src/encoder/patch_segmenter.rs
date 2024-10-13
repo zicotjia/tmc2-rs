@@ -392,8 +392,8 @@ impl PatchSegmenter {
         }
 
         geometry.normals = geometry_vox.normals;
-        // ZICO: Implement Segment Patches
         println!("Patch Segmentation");
+        // Only used to check for position
         let patches = Self::segment_patches(
             &geometry, &kd_tree, &params, &mut partition, sub_point_cloud, distance_src_rec,
             &orientations, orientations_count
@@ -1480,7 +1480,7 @@ impl PatchSegmenter {
                             }
                             let point = points.positions[i];
                             // C++ version round down, but the values are all int
-                            let d = point[normal_axis] as i16;
+                            let d = point[normal_axis];
                             let u = point[tangent_axis] as usize - patch.uv1.0;
                             let v = point[bitangent_axis] as usize - patch.uv1.1;
                             assert!(u >= 0 && u < patch.size_u);
@@ -1489,7 +1489,9 @@ impl PatchSegmenter {
                             let depth_0 = patch.depth.0[p];
                             let delta_d = projection_direction_type * (d - depth_0);
                             // ZICO: C++ version do this instead of depth0 >= INFINITE DEPTH
-                            if !(depth_0 < INFINITE_DEPTH) { continue };
+                            if !(depth_0 < INFINITE_DEPTH) {
+                                continue;
+                            }
                             let is_color_similar = Self::colorSimilarity(
                                 &frame_pcc_color[i],
                                 &frame_pcc_color[patch.depth_0pc_idx[p] as usize], 128);
@@ -1503,8 +1505,8 @@ impl PatchSegmenter {
                                     unimplemented!("enhanced occupancy map")
                                 }
                             }
-                            if patch.projection_mode == 0 && patch.depth.1[p] < patch.depth.0[p]
-                                || patch.projection_mode == 1 && patch.depth.1[p] > patch.depth.0[p] {
+                            if (patch.projection_mode == 0 && patch.depth.1[p] < patch.depth.0[p])
+                                || (patch.projection_mode == 1 && patch.depth.1[p] > patch.depth.0[p]) {
                                 println!(
                                     "ERROR: d1({}) and d0({}) for projection mode[{}]",
                                     patch.depth.1[p],
@@ -1518,7 +1520,6 @@ impl PatchSegmenter {
 
                 patch.size_d = 0;
                 let mut rec: PointSet3 = PointSet3::default();
-                // ZICO: C++ version resize to 0, dunno whats the advantage
                 let mut point_count: Vec<usize> = Vec::new();
                 point_count.resize(3, 0);
 
@@ -1559,17 +1560,18 @@ impl PatchSegmenter {
                 if use_enhanced_occupancy_map_code {
                     unimplemented!("Enhanced Occupancy Map")
                 }
-                // println!(
-                //     "\t\t Patch {} ->(d1,u1,v1)=({}, {}, {})(dd,du,dv)=({}, {}, {}), Normal: {}, Direction: {}, EOM: {}",
-                //     patch_index, patch.d1, patch.uv1.0, patch.uv1.1, patch.size_d,
-                //     patch.size_u, patch.size_v, patch.axes.0 as usize, patch.projection_mode, patch.eom_and_d1_count
-                // );
+                println!(
+                    "\t\t Patch {} ->(d1,u1,v1)=({}, {}, {})(dd,du,dv)=({}, {}, {}), Normal: {}, Direction: {}, EOM: {}",
+                    patch_index, patch.d1, patch.uv1.0, patch.uv1.1, patch.size_d,
+                    patch.size_u, patch.size_v, patch.axes.0 as usize, patch.projection_mode, patch.eom_and_d1_count
+                );
             }
             let resample_tree_start = Instant::now();
             let mut kd_tree_resampled = PCCKdTree::new();
             kd_tree_resampled.build_from_point_set(&resampled);
             let resample_tree_duration = resample_tree_start.elapsed();;
             debug!("Time taken to generate resample kd tree: {:?}", resample_tree_duration);
+            println!("Final raw_points count: {}", raw_points.len());
 
             raw_points.clear();
             // ZICO: this one check the distance diff between resampled and original then read if too far
@@ -1655,7 +1657,6 @@ impl PatchSegmenter {
 
                     patch.occupancy[p0] = true;
 
-                    // ZICO: Should prolly make this Point3D
                     let mut point = Vector3D::new(0.0, 0.0, 0.0);
                     point[normal_axis] = depth0 as f64;
                     point[tangent_axis] = u as f64 + patch.uv1.0 as f64;
@@ -1753,11 +1754,11 @@ impl PatchSegmenter {
                     }
 
                     // Adjust depth(0), depth(1)
-                    patch.depth.0[p] = projection_type_indication * (patch.depth.0[p] as i16 - patch.d1 as i16);
+                    patch.depth.0[p] = projection_type_indication * (patch.depth.0[p] - patch.d1 as i16);
                     patch.size_d = patch.size_d.max(patch.depth.0[p] as usize);
 
                     if !(use_enhanced_occupancy_map_code && !multiple_maps) {
-                        patch.depth.1[p] = projection_type_indication * (patch.depth.1[p] as i16 - patch.d1 as i16);
+                        patch.depth.1[p] = projection_type_indication * (patch.depth.1[p] - patch.d1 as i16);
                         patch.size_d = patch.size_d.max(patch.depth.1[p] as usize);
                     }
                 }
